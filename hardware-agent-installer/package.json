@@ -1,0 +1,14 @@
+{
+  "name": "ssaxxon-pos-hardware-agent-installer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:windows": "node build.mjs windows",
+    "build:linux": "node build.mjs linux"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

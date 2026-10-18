@@ -1,0 +1,11 @@
+dist/
+node_modules/
+*.log
+*.exe
+*.dll
+*.pdb
+*.obj
+*.ilk
+*.tmp
+.DS_Store
+Thumbs.db
