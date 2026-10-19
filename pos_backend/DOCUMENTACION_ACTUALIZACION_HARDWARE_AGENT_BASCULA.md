@@ -46,7 +46,7 @@ En Linux, el puerto puede ser similar a `/dev/ttyUSB0`.
 El frontend debe usar la misma configuracion del agente:
 
 ```env
-VITE_API_URL=http://localhost:3000/api
+VITE_API_URL=http://localhost:4080/api
 VITE_HARDWARE_AGENT_URL=http://127.0.0.1:18181
 VITE_HARDWARE_AGENT_TOKEN=cambia-este-token-local
 ```

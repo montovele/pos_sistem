@@ -3,7 +3,7 @@
 ## 1. Base URL
 
 ```text
-http://localhost:3000/api
+http://localhost:4080/api
 ```
 
 ## 2. CORS
@@ -12,7 +12,6 @@ El backend permite peticiones desde:
 
 - http://localhost:5173
 - http://127.0.0.1:5173
-- http://localhost:3000
 
 ## 3. Formato de respuesta
 
@@ -396,7 +395,7 @@ Ejemplo en JavaScript:
 
 ```js
 const login = async () => {
-  const res = await fetch('http://localhost:3000/api/auth/login', {
+  const res = await fetch('http://localhost:4080/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: 'admin', password: '1234' })
@@ -413,7 +412,7 @@ Ejemplo con autorización:
 ```js
 const token = localStorage.getItem('token');
 
-const products = await fetch('http://localhost:3000/api/products?page=1&perPage=50', {
+const products = await fetch('http://localhost:4080/api/products?page=1&perPage=50', {
   headers: {
     Authorization: `Bearer ${token}`
   }
@@ -427,4 +426,3 @@ const products = await fetch('http://localhost:3000/api/products?page=1&perPage=
 - El backend usa modo demo si MySQL no está disponible.
 - Cuando MySQL está activo, intenta priorizar la base de datos real.
 - Para mayor estabilidad, el frontend debe usar el mismo puerto base: `3000`.
-

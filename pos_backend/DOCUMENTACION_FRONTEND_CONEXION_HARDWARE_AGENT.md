@@ -25,7 +25,7 @@ El `hardware-agent` se ejecuta en cada computadora/caja del cliente. No se debe 
 En el proyecto Vue crear o actualizar `.env.development`:
 
 ```env
-VITE_API_URL=http://localhost:3000/api
+VITE_API_URL=http://localhost:4080/api
 VITE_HARDWARE_AGENT_URL=http://127.0.0.1:18181
 VITE_HARDWARE_AGENT_TOKEN=cambia-este-token-local
 ```
@@ -137,7 +137,7 @@ El cliente del backend debe conservar el token Bearer de autenticacion separado 
 
 ```js
 // src/services/api.js
-const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4080/api';
 
 export async function apiRequest(path, options = {}) {
   const authToken = localStorage.getItem('auth_token');

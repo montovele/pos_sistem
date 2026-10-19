@@ -16,7 +16,7 @@ import { initializeDatabase, testMySqlConnection } from './config/database.js';
 dotenv.config();
 
 const app = express();
-const port = Number(process.env.PORT || 4000);
+const port = Number(process.env.PORT || 4080);
 const demoModeEnabled = (process.env.USE_DEMO_MODE ?? 'false').toLowerCase() === 'true';
 
 global.mysqlAvailable = false;
@@ -25,7 +25,6 @@ app.use(cors({
   origin: [
     'http://localhost:5173',
     'http://127.0.0.1:5173',
-    'http://localhost:3000',
     process.env.CORS_ORIGIN || 'http://localhost:5173'
   ],
   credentials: true,

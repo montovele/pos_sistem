@@ -64,7 +64,7 @@ Crear un frontend en Vue 3 + Vite compatible con la arquitectura actual del back
 ### 3.1 Base URL
 
 ```env
-VITE_API_URL=http://localhost:3000/api
+VITE_API_URL=http://localhost:4080/api
 ```
 
 ### 3.2 Respuesta estándar
@@ -305,7 +305,7 @@ src/
 import axios from 'axios'
 
 const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3000/api',
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:4080/api',
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json'

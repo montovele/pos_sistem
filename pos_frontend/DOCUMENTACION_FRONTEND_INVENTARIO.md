@@ -19,7 +19,7 @@ La URL completa depende del puerto y host configurados en el backend.
 Ejemplo local:
 
 ```text
-http://localhost:4000/api/inventario
+http://localhost:4080/api/inventario
 ```
 
 ## 3. Autenticacion

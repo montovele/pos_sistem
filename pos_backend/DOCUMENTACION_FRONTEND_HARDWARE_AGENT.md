@@ -60,7 +60,7 @@ La venta no depende de que la impresora o el cajon funcionen. Si el agente esta 
 Variables recomendadas para el frontend:
 
 ```env
-VITE_API_URL=http://localhost:3000/api
+VITE_API_URL=http://localhost:4080/api
 VITE_HARDWARE_AGENT_URL=http://127.0.0.1:18181
 VITE_HARDWARE_AGENT_TOKEN=cambia-este-token-local
 ```
@@ -73,7 +73,7 @@ El token no debe exponerse en un frontend publico sin una estrategia adicional d
 
 ```js
 // src/services/api.js
-const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4080/api';
 
 export async function apiRequest(path, options = {}) {
   const token = localStorage.getItem('auth_token');

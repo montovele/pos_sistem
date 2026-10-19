@@ -21,21 +21,20 @@ Se cubren dos escenarios reales que existen en este repositorio:
 El backend principal expone la API en:
 
 ```text
-http://localhost:3000/api
+http://localhost:4080/api
 ```
 
 Y en el `app.js` del proyecto se habilita CORS para:
 
 - `http://localhost:5173`
 - `http://127.0.0.1:5173`
-- `http://localhost:3000`
 
 Esto permite que un frontend Vue corriendo en Vite pueda consumir la API sin problemas.
 
 ### Variables de entorno recomendadas
 
 ```env
-VITE_API_URL=http://localhost:3000/api
+VITE_API_URL=http://localhost:4080/api
 VITE_APP_NAME=POS Professional
 VITE_ENV=development
 ```

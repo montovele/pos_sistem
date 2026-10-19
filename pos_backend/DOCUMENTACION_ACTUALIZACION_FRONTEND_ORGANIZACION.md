@@ -96,7 +96,7 @@ No guardar una organización seleccionable por separado como fuente de autorizac
 El cliente debe agregar el token a todas las rutas protegidas:
 
 ```js
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4080/api';
 
 export async function apiRequest(path, options = {}) {
   const session = JSON.parse(localStorage.getItem('pos.session') || 'null');

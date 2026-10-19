@@ -24,7 +24,7 @@ La API backend expone endpoints REST con formato estándar:
 Base URL recomendada:
 
 ```text
-http://localhost:3000/api
+http://localhost:4080/api
 ```
 
 ---
@@ -34,7 +34,7 @@ http://localhost:3000/api
 ### 2.1 Variables de entorno
 
 ```env
-VITE_API_URL=http://localhost:3000/api
+VITE_API_URL=http://localhost:4080/api
 VITE_APP_NAME=POS Professional
 VITE_ENV=development
 ```

@@ -15,12 +15,7 @@ Esto provoca que la aplicación no pueda enviar ni recibir información del back
 
 ### 1.1 Confusión de configuración de API
 
-El frontend se configuró con varias URLs distintas a lo largo del proyecto:
-
-- `http://localhost:3001/api`
-- `http://localhost:3000/api`
-- proxy en Vite apuntando a `3001`
-- archivos `.env` con valores inconsistentes
+Se encontraron referencias históricas a los puertos `3000`, `3001` y `4000`. La configuración actual usa el backend POS en `http://localhost:4080`; Vite mantiene `VITE_API_URL=/api` y reenvía `/api` a `http://127.0.0.1:4080`. Vite prioriza `.env.local`, así que ambos archivos de entorno deben conservar el mismo destino.
 
 Esto genera que el cliente no sepa a qué servidor apuntar. En la práctica, una app puede compilar pero fallar en tiempo de ejecución si la API no está escuchando en el puerto correcto.
 
@@ -76,10 +71,10 @@ En otras palabras: el sistema está preparado para trabajar con una API Express,
 
 ### 3.1 Estándar de puerto
 
-Usar un único puerto para el backend, por ejemplo:
+Usar un único puerto para el backend: `4080`.
 
 ```text
-http://localhost:3000
+http://localhost:4080
 ```
 
 Con eso, todas las llamadas desde frontend pueden apuntar a la misma base URL.

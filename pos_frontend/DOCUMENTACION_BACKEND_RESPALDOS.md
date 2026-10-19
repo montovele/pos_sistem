@@ -16,7 +16,7 @@ La API esta implementada en `backend/server.js`.
 
 - Node.js instalado.
 - Dependencias del backend instaladas.
-- Backend ejecutandose en `http://localhost:4000`.
+- Backend ejecutandose en `http://localhost:4080`.
 - Usuario con rol `admin`.
 - Token Bearer obtenido desde `/api/auth/login`.
 
@@ -31,7 +31,7 @@ npm run dev
 El frontend usa normalmente esta URL:
 
 ```env
-VITE_API_URL=http://localhost:4000/api
+VITE_API_URL=http://localhost:4080/api
 ```
 
 ## 3. Autenticacion
@@ -48,7 +48,7 @@ Obtener un token de prueba:
 
 ```powershell
 $login = Invoke-RestMethod `
-  -Uri http://localhost:4000/api/auth/login `
+  -Uri http://localhost:4080/api/auth/login `
   -Method Post `
   -ContentType 'application/json' `
   -Body '{"username":"admin","password":"admin"}'
@@ -85,7 +85,7 @@ Si no se envia formato, se utiliza `json`.
 $body = @{ format = 'xlsx' } | ConvertTo-Json
 
 $created = Invoke-RestMethod `
-  -Uri http://localhost:4000/api/backups `
+  -Uri http://localhost:4080/api/backups `
   -Method Post `
   -Headers $headers `
   -ContentType 'application/json' `
@@ -121,7 +121,7 @@ Ejemplo:
 
 ```powershell
 Invoke-RestMethod `
-  -Uri http://localhost:4000/api/backups `
+  -Uri http://localhost:4080/api/backups `
   -Headers $headers
 ```
 
@@ -142,7 +142,7 @@ El parametro `format` es opcional. Si se omite, se usa el formato con el que se 
 
 ```powershell
 Invoke-WebRequest `
-  -Uri http://localhost:4000/api/backups/1/download?format=json `
+  -Uri http://localhost:4080/api/backups/1/download?format=json `
   -Headers $headers `
   -OutFile .\respaldo-1.json
 ```
@@ -151,7 +151,7 @@ Invoke-WebRequest `
 
 ```powershell
 Invoke-WebRequest `
-  -Uri http://localhost:4000/api/backups/1/download?format=csv `
+  -Uri http://localhost:4080/api/backups/1/download?format=csv `
   -Headers $headers `
   -OutFile .\respaldo-1.csv
 ```
@@ -160,7 +160,7 @@ Invoke-WebRequest `
 
 ```powershell
 Invoke-WebRequest `
-  -Uri http://localhost:4000/api/backups/1/download?format=xlsx `
+  -Uri http://localhost:4080/api/backups/1/download?format=xlsx `
   -Headers $headers `
   -OutFile .\respaldo-1.xlsx
 ```
@@ -182,7 +182,7 @@ Authorization: Bearer <token>
 
 ```powershell
 Invoke-RestMethod `
-  -Uri http://localhost:4000/api/backups/1/restore `
+  -Uri http://localhost:4080/api/backups/1/restore `
   -Method Post `
   -Headers $headers
 ```

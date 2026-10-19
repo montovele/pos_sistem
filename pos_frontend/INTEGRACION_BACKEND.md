@@ -5,7 +5,7 @@
 ✅ **Frontend:** Vue 3 + Vite + Pinia + Axios  
 ✅ **Backend:** Express.js en Node.js  
 ✅ **Arquitectura:** Frontend y backend separados, sin PHP  
-✅ **API base:** `http://localhost:3000/api`  
+✅ **API base:** `http://localhost:4080/api`  
 ✅ **Base de datos:** MySQL/MariaDB o cualquier motor compatible con Node.js via driver nativo o ORM  
 
 > El proyecto debe ejecutarse exclusivamente con Vue 3 en el frontend y Express como API backend. No se permite depender en PHP ni en archivos `.php`.
@@ -50,7 +50,7 @@ npm install
 Asegúrate de que el archivo `.env` tenga esta configuración:
 
 ```env
-VITE_API_URL=http://localhost:3000/api
+VITE_API_URL=http://localhost:4080/api
 VITE_API_TIMEOUT=30000
 VITE_APP_NAME="POS System"
 VITE_APP_VERSION=1.0.0
@@ -237,7 +237,7 @@ La capa de persistencia debe ejecutarse desde Express, no desde PHP. Una impleme
 Ejemplo de variables de entorno:
 
 ```env
-PORT=3000
+PORT=4080
 DB_HOST=localhost
 DB_PORT=3306
 DB_NAME=pos
@@ -266,7 +266,7 @@ En el backend Express, se valida el token antes de aceptar rutas protegidas.
 
 **Síntoma:**
 ```text
-Access to fetch at 'http://localhost:3000/api/...'
+Access to fetch at 'http://localhost:4080/api/...'
 from origin 'http://localhost:5173' has been blocked by CORS policy
 ```
 
@@ -297,12 +297,12 @@ EADDRINUSE: address already in use
 
 **Síntoma:**
 ```text
-GET http://localhost:3000/api/products 404
+GET http://localhost:4080/api/products 404
 ```
 
 **Solución:**
 - Revisa que el endpoint exista exactamente en Express
-- Confirma que `VITE_API_URL` apunta a `http://localhost:3000/api`
+- Confirma que `VITE_API_URL` apunta a `http://localhost:4080/api`
 - Asegúrate de haber iniciado el backend
 
 ---
@@ -327,7 +327,7 @@ Vue 3 + Vite + Express + Node.js + MySQL
 ### Test 1: Verificar salud del backend
 
 ```bash
-curl http://localhost:3000/api/health
+curl http://localhost:4080/api/health
 ```
 
 Debe responder con JSON válido.
@@ -335,7 +335,7 @@ Debe responder con JSON válido.
 ### Test 2: Login desde frontend
 
 ```javascript
-fetch('http://localhost:3000/api/auth/login', {
+fetch('http://localhost:4080/api/auth/login', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
@@ -350,7 +350,7 @@ fetch('http://localhost:3000/api/auth/login', {
 ### Test 3: Cargar productos
 
 ```javascript
-fetch('http://localhost:3000/api/products')
+fetch('http://localhost:4080/api/products')
   .then(r => r.json())
   .then(console.log)
 ```
@@ -362,7 +362,7 @@ fetch('http://localhost:3000/api/products')
 Ejemplo de llamada a la API desde un servicio:
 
 ```ts
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4080/api';
 
 export async function login(username: string, password: string) {
   const res = await fetch(`${API_URL}/auth/login`, {
@@ -396,7 +396,7 @@ const handleLogin = async () => {
 - [x] Frontend Vue 3
 - [x] Backend Express.js
 - [x] Sin PHP
-- [x] API en `http://localhost:3000/api`
+- [x] API en `http://localhost:4080/api`
 - [x] `.env` apunta a la API Express
 - [x] `npm run dev` inicia Vue 3
 - [x] `node server.js` o `npm run server` inicia Express
@@ -418,4 +418,3 @@ Este enfoque mantiene el proyecto moderno, escalable y congruente con la arquite
 
 **Última actualización:** Agosto 2026  
 **Estado:** 🟢 Stack corregido a Vue 3 + Express sin PHP
-
