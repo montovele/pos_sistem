@@ -88,6 +88,67 @@ test('issues a fresh activation email only for the matching checkout email', asy
   );
 });
 
+test('creates and sends the access email when recovering an already provisioned signup without a sent email', async () => {
+  const statements = [];
+  let sentMessage;
+  const signup = {
+    id: 'signup-id',
+    nombre_org: 'Tienda',
+    nombre: 'Ana',
+    apellido: 'Lopez',
+    email: 'ana@example.com',
+    telefono: null,
+    stripe_customer_id: 'cus_test',
+    stripe_checkout_session_id: 'cs_test_12345678',
+    status: 'provisioned',
+    organization_id: 3,
+    user_id: 9,
+    account_email_sent_at: null,
+    email_resend_allowed: 1
+  };
+  const connection = {
+    beginTransaction: async () => {},
+    commit: async () => {},
+    rollback: async () => {},
+    release: () => {},
+    execute: async (sql, values) => {
+      statements.push({ sql, values });
+      if (sql.includes('FROM pos_pending_signups')) return [[signup], []];
+      if (sql.includes('SELECT username FROM usuarios')) return [[{ username: 'admin-ana' }], []];
+      return [{ affectedRows: 1, insertId: 7 }, []];
+    }
+  };
+  const service = createGuestSignupService({
+    pool: {
+      execute: async () => [{ affectedRows: 1 }, []],
+      getConnection: async () => connection
+    },
+    emailService: {
+      sendAdminActivation: async (message) => { sentMessage = message; }
+    },
+    frontendUrl: 'https://pos.example.com'
+  });
+  const checkout = {
+    id: 'cs_test_12345678',
+    mode: 'subscription',
+    payment_status: 'paid',
+    customer: 'cus_test',
+    subscription: 'sub_test',
+    metadata: { pending_signup_id: 'signup-id' }
+  };
+
+  const delivery = await service.provisionPaidCheckout(checkout);
+  assert.equal(delivery.email, 'ana@example.com');
+  assert.equal(delivery.username, 'admin-ana');
+  assert.ok(delivery.token);
+
+  await service.sendActivationEmail(delivery);
+  assert.equal(sentMessage.to, 'ana@example.com');
+  assert.equal(sentMessage.username, 'admin-ana');
+  assert.match(sentMessage.activationUrl, /^https:\/\/pos\.example\.com\/activar-cuenta\?token=/);
+  assert.ok(statements.some(({ sql }) => sql.includes('account_email_last_attempt_at = UTC_TIMESTAMP()')));
+});
+
 test('throttles repeated activation email requests', async () => {
   let tokenInserted = false;
   const connection = {

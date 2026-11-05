@@ -126,7 +126,7 @@ router.get('/public/payment-recovery/:token', async (req, res) => {
   res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
   try {
     let result = await guestSignupService.getPaymentRecovery(req.params.token);
-    if (result.paymentConfirmed && !result.signupProvisioned) {
+    if (result.paymentConfirmed && (!result.signupProvisioned || !result.account.emailSent)) {
       try {
         await service.reconcileGuestCheckout(result.checkoutSessionId);
       } catch (error) {
