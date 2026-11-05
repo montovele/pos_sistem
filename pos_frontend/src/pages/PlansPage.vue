@@ -96,6 +96,7 @@
               {{ plan?.is_active ? 'La contratación en línea aún no está habilitada. Contacta al administrador del servicio.' : 'El plan está temporalmente deshabilitado. Vuelve a consultar más tarde.' }}
             </p>
             <p class="secure-note"><span>▣</span> El pago se procesa en Stripe. No guardamos los datos de tu tarjeta.</p>
+            <RouterLink class="recovery-link" to="/recuperar-pago">¿Ya iniciaste un pago? Recupera tu contratación</RouterLink>
           </form>
         </div>
 
@@ -126,6 +127,7 @@
           <button v-if="paymentState !== 'account_ready'" class="refresh-button" type="button" :disabled="checkingPayment" @click="checkCheckoutStatus">
             {{ checkingPayment ? 'Consultando…' : 'Actualizar estado' }}
           </button>
+          <RouterLink class="back-link" to="/recuperar-pago">¿No puedes continuar? Recupera tu contratación por correo</RouterLink>
           <RouterLink class="back-link" to="/">Volver al inicio</RouterLink>
         </div>
 
@@ -135,6 +137,7 @@
           <h2>No se realizó ningún cargo desde esta página.</h2>
           <p>Puedes volver al plan e iniciar el proceso de pago cuando estés listo. Si solo querías consultar, no necesitas una cuenta para hacerlo.</p>
           <button class="refresh-button" type="button" @click="checkoutState = 'form'">Volver a los planes</button>
+          <RouterLink class="back-link" to="/recuperar-pago">¿Ya habías iniciado o completado un pago? Recuperarlo</RouterLink>
         </div>
       </article>
     </section>
@@ -385,6 +388,7 @@ onUnmounted(() => {
 .secure-note { margin: -0.15rem 0 0; color: #8792a3; font-size: 0.62rem; text-align: center; }
 .secure-note span { margin-right: 0.25rem; color: #528369; }
 .configuration-note { margin: -0.15rem 0 0; color: #956622; font-size: 0.64rem; line-height: 1.5; }
+.recovery-link { color: #526bc1; font-size: 0.68rem; font-weight: 700; text-align: center; text-decoration: none; }
 .notice { margin-top: 0.8rem; padding: 0.65rem 0.75rem; border-radius: 7px; font-size: 0.69rem; line-height: 1.5; }
 .notice-info { background: #edf2ff; color: #415a9f; }
 .notice-error { background: #fff0ef; color: #a93630; }

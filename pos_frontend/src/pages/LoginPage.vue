@@ -108,6 +108,7 @@
           <span>Tu acceso es privado. No compartas tu contraseña con otras personas.</span>
         </div>
 
+        <RouterLink class="recovery-link" to="/recuperar-pago">¿Tienes un pago pendiente? Recupera tu contratación</RouterLink>
         <RouterLink class="home-link" to="/">← Volver al inicio</RouterLink>
       </div>
     </section>
@@ -495,6 +496,7 @@ const handleSubmit = async () => {
 }
 
 .visibility-button:focus-visible,
+.recovery-link:focus-visible,
 .home-link:focus-visible,
 .plans-link:focus-visible,
 .brand:focus-visible {
@@ -581,6 +583,20 @@ const handleSubmit = async () => {
   font-size: 0.68rem;
   font-weight: 650;
   text-decoration: none;
+}
+
+.recovery-link {
+  display: inline-block;
+  align-self: flex-start;
+  margin-top: 1.15rem;
+  color: var(--blue);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.recovery-link:hover {
+  text-decoration: underline;
 }
 
 .home-link:hover {

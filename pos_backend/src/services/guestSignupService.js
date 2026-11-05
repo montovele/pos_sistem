@@ -2,6 +2,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { hashPassword } from './authService.js';
 
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+const RECOVERY_TOKEN_TTL_MS = 30 * 60 * 1000;
+const PLAN_CODE = 'monthly';
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const serviceError = (message, status, code) => Object.assign(new Error(message), { status, code });
@@ -68,7 +70,7 @@ export function createGuestSignupService({
        FROM pos_subscription_plans
        WHERE code = ?
        LIMIT 1`,
-      ['monthly']
+      [PLAN_CODE]
     );
     const plan = planRows[0];
     if (!plan?.stripe_price_id) {
@@ -168,12 +170,14 @@ export function createGuestSignupService({
       client_reference_id: pending.id,
       metadata: {
         pending_signup_id: pending.id,
-        plan_code: plan.code
+        plan_code: plan.code,
+        price_id: plan.stripe_price_id
       },
       subscription_data: {
         metadata: {
           pending_signup_id: pending.id,
-          plan_code: plan.code
+          plan_code: plan.code,
+          price_id: plan.stripe_price_id
         }
       },
       success_url: `${frontendBaseUrl}/planes?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
@@ -378,6 +382,218 @@ export function createGuestSignupService({
     return { status: 'processing' };
   }
 
+  async function requestPaymentRecovery(emailValue) {
+    const email = String(emailValue || '').trim().toLowerCase();
+    if (!emailPattern.test(email) || email.length > 150) {
+      return { accepted: true };
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT id
+       FROM pos_pending_signups
+       WHERE email = ?
+       LIMIT 1`,
+      [email]
+    );
+    const signup = rows[0];
+    if (!signup) return { accepted: true };
+
+    const token = randomBytes(32).toString('base64url');
+    const expiresAt = new Date(Date.now() + RECOVERY_TOKEN_TTL_MS);
+    const [updateResult] = await pool.execute(
+      `UPDATE pos_pending_signups
+       SET recovery_token_hash = ?, recovery_token_expires_at = ?, recovery_last_sent_at = UTC_TIMESTAMP()
+       WHERE id = ?
+         AND (recovery_last_sent_at IS NULL
+           OR recovery_last_sent_at <= UTC_TIMESTAMP() - INTERVAL 60 SECOND)`,
+      [hashToken(token), asSqlDate(expiresAt), signup.id]
+    );
+    if (!updateResult.affectedRows) return { accepted: true };
+
+    if (!emailService?.sendPaymentRecovery) {
+      console.error('[payment-recovery] Servicio de correo no disponible para la contratación:', signup.id);
+      return { accepted: true };
+    }
+
+    const recoveryUrl = `${String(frontendUrl).replace(/\/+$/, '')}/recuperar-pago?token=${encodeURIComponent(token)}`;
+    const logEmailError = (error) => console.error('[payment-recovery] No se pudo enviar el enlace:', {
+      signupId: signup.id,
+      code: error.code || 'RECOVERY_EMAIL_SEND_FAILED',
+      message: error.message
+    });
+    try {
+      void Promise.resolve(emailService.sendPaymentRecovery({ to: email, recoveryUrl })).catch(logEmailError);
+    } catch (error) {
+      logEmailError(error);
+    }
+    return { accepted: true };
+  }
+
+  async function getPaymentRecovery(tokenValue) {
+    const token = String(tokenValue || '').trim();
+    if (!/^[A-Za-z0-9_-]{40,50}$/.test(token)) {
+      throw serviceError('El enlace de recuperación no es válido o venció.', 404, 'RECOVERY_NOT_FOUND');
+    }
+    const [rows] = await pool.execute(
+      `SELECT signup.id, signup.email, signup.nombre_org, signup.stripe_customer_id,
+              signup.stripe_checkout_session_id, signup.status,
+              signup.organization_id, signup.user_id, signup.account_email_sent_at,
+              signup.created_at, signup.updated_at,
+              (signup.recovery_token_expires_at > UTC_TIMESTAMP()) AS recovery_valid,
+              (SELECT MAX(consumed_at)
+               FROM pos_account_setup_tokens
+               WHERE user_id = signup.user_id) AS setup_completed_at,
+              plan.name AS plan_name, plan.amount AS plan_amount, plan.currency AS plan_currency
+       FROM pos_pending_signups signup
+       LEFT JOIN pos_subscription_plans plan ON plan.code = 'monthly'
+       WHERE signup.recovery_token_hash = ?
+       LIMIT 1`,
+      [hashToken(token)]
+    );
+    const signup = rows[0];
+    if (!signup || !signup.recovery_valid) {
+      throw serviceError('El enlace de recuperación no es válido o venció. Solicita uno nuevo.', 404, 'RECOVERY_NOT_FOUND');
+    }
+
+    let status = 'pending';
+    let checkoutUrl = null;
+    let paymentConfirmed = false;
+    let stripeSessionStatus = null;
+    let stripePaymentStatus = null;
+    let stripeSessionMode = null;
+    let payment = {
+      status: 'pending',
+      amount: Number(signup.plan_amount || 0),
+      currency: signup.plan_currency || 'MXN',
+      createdAt: signup.created_at,
+      updatedAt: signup.updated_at
+    };
+    if (signup.stripe_checkout_session_id) {
+      if (!stripe) throw serviceError('Stripe no está disponible para consultar el pago.', 503, 'STRIPE_UNAVAILABLE');
+      const session = await stripe.checkout.sessions.retrieve(signup.stripe_checkout_session_id);
+      const sessionCustomerId = typeof session.customer === 'string' ? session.customer : session.customer?.id;
+      if (
+        session.mode !== 'subscription'
+        || session.metadata?.plan_code !== PLAN_CODE
+        || session.metadata?.pending_signup_id !== signup.id
+        || session.client_reference_id !== signup.id
+        || sessionCustomerId !== signup.stripe_customer_id
+      ) {
+        throw serviceError('La sesión de pago no coincide con la contratación registrada.', 409, 'CHECKOUT_MISMATCH');
+      }
+      stripeSessionStatus = session.status;
+      stripePaymentStatus = session.payment_status;
+      stripeSessionMode = session.mode;
+      paymentConfirmed = session.mode === 'subscription'
+        && ['paid', 'no_payment_required'].includes(session.payment_status)
+        && Boolean(session.subscription);
+      payment = {
+        reference: `${signup.stripe_checkout_session_id.slice(0, 7)}…`,
+        status: paymentConfirmed ? 'approved' : session.status === 'expired' ? 'expired' : 'pending',
+        amount: session.amount_total !== null && session.amount_total !== undefined
+          && Number.isFinite(Number(session.amount_total))
+          ? Number(session.amount_total) / 100
+          : Number(signup.plan_amount || 0),
+        currency: String(session.currency || signup.plan_currency || 'MXN').toUpperCase(),
+        createdAt: session.created ? new Date(Number(session.created) * 1000).toISOString() : signup.created_at,
+        updatedAt: signup.updated_at
+      };
+      if (session.status === 'open' && session.url) {
+        status = 'requires_action';
+        checkoutUrl = session.url;
+      } else if (paymentConfirmed) {
+        status = 'approved';
+      } else if (session.status === 'expired' && session.payment_status === 'unpaid') {
+        status = 'expired';
+      } else {
+        status = 'pending';
+      }
+    }
+
+    let subscriptionStatus = 'pending';
+    if (signup.status === 'provisioned' && signup.organization_id) {
+      const [subscriptionRows] = await pool.execute(
+        `SELECT status
+         FROM pos_subscriptions
+         WHERE organization_id = ?
+         ORDER BY id DESC
+         LIMIT 1`,
+        [Number(signup.organization_id)]
+      );
+      subscriptionStatus = subscriptionRows[0]?.status || 'pending';
+    }
+
+    if (signup.status === 'provisioned') {
+      status = signup.setup_completed_at
+        ? 'active'
+        : 'activation_pending';
+      payment.status = 'approved';
+    }
+
+    return {
+      status,
+      paymentConfirmed,
+      checkoutUrl,
+      payment,
+      subscription: { status: subscriptionStatus },
+      account: {
+        status: signup.setup_completed_at ? 'active' : signup.status === 'provisioned' ? 'activation_pending' : 'inactive',
+        emailSent: Boolean(signup.account_email_sent_at)
+      },
+      nextAction: status === 'active'
+        ? 'enter_pos'
+        : status === 'requires_action'
+          ? 'continue_payment'
+          : status === 'expired'
+            ? 'retry_payment'
+            : 'wait_and_check',
+      checkoutSessionId: signup.stripe_checkout_session_id,
+      stripeSessionStatus,
+      stripePaymentStatus,
+      stripeSessionMode,
+      signupEmail: signup.email,
+      signupProvisioned: signup.status === 'provisioned',
+      plan: signup.plan_name ? {
+        name: signup.plan_name,
+        amount: Number(signup.plan_amount),
+        currency: signup.plan_currency
+      } : null,
+      organizationName: signup.nombre_org
+    };
+  }
+
+  async function retryPaymentRecovery(tokenValue, baseUrl = frontendUrl) {
+    const recovery = await getPaymentRecovery(tokenValue);
+    if (
+      recovery.status !== 'expired'
+      || recovery.stripeSessionStatus !== 'expired'
+      || recovery.stripePaymentStatus !== 'unpaid'
+      || recovery.stripeSessionMode !== 'subscription'
+      || !recovery.checkoutSessionId
+    ) {
+      throw serviceError('Solo puedes reintentar el pago cuando Stripe confirme que la sesión anterior expiró sin cobrar.', 409, 'PAYMENT_RETRY_NOT_ALLOWED');
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT nombre_org, nombre, apellido, email, telefono
+       FROM pos_pending_signups
+       WHERE stripe_checkout_session_id = ?
+       LIMIT 1`,
+      [recovery.checkoutSessionId]
+    );
+    const signup = rows[0];
+    if (!signup) throw serviceError('No se encontró la contratación solicitada.', 404, 'RECOVERY_NOT_FOUND');
+
+    const retryKey = `recovery:${checkoutKeyHash(`${recovery.checkoutSessionId}:${tokenValue}`).slice(0, 48)}`;
+    return createCheckout({
+      businessName: signup.nombre_org,
+      firstName: signup.nombre,
+      lastName: signup.apellido,
+      email: signup.email,
+      phone: signup.telefono || ''
+    }, retryKey, baseUrl);
+  }
+
   async function activateAccount(tokenValue, passwordValue) {
     const token = String(tokenValue || '').trim();
     const password = String(passwordValue || '');
@@ -432,6 +648,9 @@ export function createGuestSignupService({
     provisionPaidCheckout,
     sendActivationEmail,
     getCheckoutStatus,
+    requestPaymentRecovery,
+    getPaymentRecovery,
+    retryPaymentRecovery,
     activateAccount
   };
 }

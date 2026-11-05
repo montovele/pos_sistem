@@ -103,6 +103,106 @@ router.get('/public/checkout-status/:sessionId', async (req, res) => {
   }
 });
 
+router.post('/public/payment-recovery', async (req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+  if (!global.mysqlAvailable) {
+    return res.status(202).json({
+      success: true,
+      data: { accepted: true }
+    });
+  }
+  try {
+    await guestSignupService.requestPaymentRecovery(req.body?.email);
+    return res.status(202).json({
+      success: true,
+      data: { accepted: true }
+    });
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+router.get('/public/payment-recovery/:token', async (req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+  try {
+    let result = await guestSignupService.getPaymentRecovery(req.params.token);
+    if (result.paymentConfirmed && !result.signupProvisioned) {
+      try {
+        await service.reconcileGuestCheckout(result.checkoutSessionId);
+      } catch (error) {
+        if (!['ACCOUNT_EMAIL_NOT_CONFIGURED', 'ACCOUNT_EMAIL_SEND_FAILED', 'ACCOUNT_EMAIL_UNAVAILABLE'].includes(error.code)) {
+          throw error;
+        }
+      }
+      result = await guestSignupService.getPaymentRecovery(req.params.token);
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        status: result.status,
+        paymentConfirmed: result.paymentConfirmed,
+        checkoutUrl: result.checkoutUrl,
+        payment: result.payment,
+        subscription: result.subscription,
+        account: result.account,
+        nextAction: result.nextAction,
+        plan: result.plan
+      }
+    });
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+router.post('/public/payment-recovery/:token/retry', async (req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+  try {
+    const result = await guestSignupService.retryPaymentRecovery(
+      req.params.token,
+      process.env.FRONTEND_URL || 'http://localhost:5173'
+    );
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
+router.post('/public/payment-recovery/:token/resend-account-email', async (req, res) => {
+  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+  try {
+    const recovery = await guestSignupService.getPaymentRecovery(req.params.token);
+    if (
+      !recovery.signupProvisioned
+      || recovery.status === 'active'
+      || !recovery.checkoutSessionId
+      || !recovery.signupEmail
+    ) {
+      return res.status(409).json({
+        success: false,
+        code: recovery.status === 'active' ? 'ACCOUNT_ALREADY_ACTIVE' : 'ACCOUNT_NOT_READY',
+        message: recovery.status === 'active'
+          ? 'La cuenta ya está activa. Inicia sesión para continuar.'
+          : 'La cuenta todavía no está lista para reenviar el correo.'
+      });
+    }
+    const result = await service.reconcileGuestCheckout(recovery.checkoutSessionId, {
+      resendEmail: true,
+      email: recovery.signupEmail
+    });
+    return res.json({
+      success: true,
+      data: {
+        payment_confirmed: result.payment_confirmed,
+        email_sent: result.email_sent,
+        status: result.email_sent ? 'account_ready' : 'email_pending'
+      }
+    });
+  } catch (error) {
+    return sendError(res, error);
+  }
+});
+
 router.post('/public/reconcile-checkout/:sessionId', async (req, res) => {
   try {
     const result = await service.reconcileGuestCheckout(req.params.sessionId);
@@ -150,6 +250,26 @@ router.get('/payments', requireAuth, async (req, res) => {
     });
   } catch (error) {
     sendError(res, error);
+  }
+});
+
+router.get('/me/payment-status', requireAuth, async (req, res) => {
+  try {
+    const [subscription, payments] = await Promise.all([
+      service.getStatus(req.user.organizationId),
+      service.listOrganizationPayments(req.user.organizationId)
+    ]);
+    return res.json({
+      success: true,
+      data: {
+        subscription: subscription.subscription,
+        status: subscription.status,
+        access_allowed: subscription.access_allowed,
+        latest_payment: payments[0] || null
+      }
+    });
+  } catch (error) {
+    return sendError(res, error);
   }
 });
 

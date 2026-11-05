@@ -239,3 +239,34 @@ test('reports SMTP delivery errors and closes the transporter', async () => {
   );
   assert.equal(closed, true);
 });
+
+test('sends payment recovery links using the configured SMTP profile', async () => {
+  let transportConfig;
+  let message;
+  let closed = false;
+  const service = createAccountEmailService({
+    MAIL_PROVIDER: 'ionos',
+    SMTP_USER_IONOS: 'noreply@lemarquet.com',
+    SMTP_PASS_IONOS: 'smtp-password',
+    SMTP_FROM_IONOS: 'noreply@lemarquet.com'
+  }, (config) => {
+    transportConfig = config;
+    return {
+      sendMail: async (value) => { message = value; return { messageId: 'recovery-message' }; },
+      close: () => { closed = true; }
+    };
+  });
+
+  await service.sendPaymentRecovery({
+    to: 'customer@example.com',
+    recoveryUrl: 'https://pos.example.com/recuperar-pago?token=secure-token'
+  });
+
+  assert.equal(transportConfig.host, 'smtp.ionos.com');
+  assert.equal(transportConfig.auth.user, 'noreply@lemarquet.com');
+  assert.equal(message.to, 'customer@example.com');
+  assert.match(message.subject, /recupera tu contratación/i);
+  assert.match(message.text, /secure-token/);
+  assert.match(message.html, /https:\/\/pos\.example\.com/);
+  assert.equal(closed, true);
+});

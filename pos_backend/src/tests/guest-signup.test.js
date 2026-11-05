@@ -179,3 +179,220 @@ test('rejects activation passwords shorter than 10 characters', async () => {
     (error) => error.code === 'INVALID_PASSWORD' && error.status === 422
   );
 });
+
+test('sends a generic payment recovery email and stores only the token hash', async () => {
+  let storedTokenHash = '';
+  let recoveryEmail;
+  const service = createGuestSignupService({
+    pool: {
+      execute: async (sql, values) => {
+        if (sql.includes('FROM pos_pending_signups')) {
+          return [[{ id: 'signup-id', recovery_allowed: 1 }], []];
+        }
+        if (sql.includes('SET recovery_token_hash')) {
+          storedTokenHash = values[0];
+          return [{ affectedRows: 1 }, []];
+        }
+        throw new Error(`Unexpected query: ${sql}`);
+      },
+      getConnection: async () => { throw new Error('No transaction expected'); }
+    },
+    emailService: {
+      sendPaymentRecovery: async (message) => { recoveryEmail = message; }
+    },
+    frontendUrl: 'https://pos.example.com'
+  });
+
+  assert.deepEqual(await service.requestPaymentRecovery('ANA@example.com'), { accepted: true });
+  const token = new URL(recoveryEmail.recoveryUrl).searchParams.get('token');
+  assert.match(token, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(recoveryEmail.to, 'ana@example.com');
+  assert.equal(storedTokenHash, createHash('sha256').update(token).digest('hex'));
+  assert.notEqual(storedTokenHash, token);
+});
+
+test('returns a safe live status and amount for a recovery token', async () => {
+  const token = 'r'.repeat(43);
+  const signup = {
+    id: 'signup-id',
+    email: 'ana@example.com',
+    nombre_org: 'Tienda',
+    stripe_customer_id: 'cus_test',
+    stripe_checkout_session_id: 'cs_test_12345678',
+    status: 'checkout_created',
+    account_email_sent_at: null,
+    recovery_valid: 1,
+    setup_completed_at: null,
+    plan_name: 'Plan mensual',
+    plan_amount: '299.00',
+    plan_currency: 'MXN',
+    created_at: '2026-01-01 10:00:00',
+    updated_at: '2026-01-01 10:00:00'
+  };
+  const service = createGuestSignupService({
+    pool: {
+      execute: async (_sql, values) => {
+        assert.equal(values[0], createHash('sha256').update(token).digest('hex'));
+        return [[signup], []];
+      },
+      getConnection: async () => { throw new Error('No transaction expected'); }
+    },
+    stripe: {
+      checkout: {
+        sessions: {
+          retrieve: async () => ({
+            id: 'cs_test_12345678',
+            mode: 'subscription',
+            status: 'open',
+            payment_status: 'unpaid',
+            amount_total: 29900,
+            currency: 'mxn',
+            created: 1760000000,
+            customer: 'cus_test',
+            client_reference_id: 'signup-id',
+            metadata: { pending_signup_id: 'signup-id', plan_code: 'monthly' },
+            url: 'https://checkout.stripe.com/session'
+          })
+        }
+      }
+    }
+  });
+
+  const result = await service.getPaymentRecovery(token);
+  assert.equal(result.status, 'requires_action');
+  assert.equal(result.nextAction, 'continue_payment');
+  assert.equal(result.payment.amount, 299);
+  assert.equal(result.payment.currency, 'MXN');
+  assert.equal(result.checkoutUrl, 'https://checkout.stripe.com/session');
+  assert.equal(result.signupEmail, 'ana@example.com');
+});
+
+test('retries payment only after Stripe reports an expired unpaid session', async () => {
+  const token = 't'.repeat(43);
+  const checkoutCalls = [];
+  const signup = {
+    id: 'signup-id',
+    email: 'ana@example.com',
+    nombre_org: 'Tienda',
+    nombre: 'Ana',
+    apellido: 'Lopez',
+    telefono: null,
+    stripe_customer_id: 'cus_test',
+    stripe_checkout_session_id: 'cs_test_12345678',
+    status: 'checkout_created',
+    account_email_sent_at: null,
+    recovery_valid: 1,
+    setup_completed_at: null,
+    plan_name: 'Plan mensual',
+    plan_amount: '299.00',
+    plan_currency: 'MXN'
+  };
+  const pendingSignup = {
+    id: 'signup-id',
+    idempotency_key: 'old-key',
+    stripe_customer_id: 'cus_test',
+    stripe_checkout_session_id: 'cs_test_12345678',
+    status: 'checkout_created'
+  };
+  const pool = {
+    execute: async (sql) => {
+      if (sql.includes('WHERE signup.recovery_token_hash')) return [[signup], []];
+      if (sql.includes('SELECT id FROM usuarios')) return [[], []];
+      if (sql.includes('FROM pos_subscription_plans')) {
+        return [[{
+          code: 'monthly',
+          name: 'Plan mensual',
+          amount: 299,
+          currency: 'MXN',
+          interval_unit: 'month',
+          interval_count: 1,
+          is_active: 1,
+          stripe_price_id: 'price_monthly'
+        }], []];
+      }
+      if (sql.includes('SELECT nombre_org, nombre, apellido, email, telefono')) {
+        return [[{
+          nombre_org: 'Tienda',
+          nombre: 'Ana',
+          apellido: 'Lopez',
+          email: 'ana@example.com',
+          telefono: null
+        }], []];
+      }
+      if (sql.includes('SELECT id, idempotency_key')) return [[pendingSignup], []];
+      return [{ affectedRows: 1 }, []];
+    },
+    getConnection: async () => { throw new Error('No transaction expected'); }
+  };
+  const stripe = {
+    checkout: {
+      sessions: {
+        retrieve: async () => ({
+          id: 'cs_test_12345678',
+          mode: 'subscription',
+          status: 'expired',
+          payment_status: 'unpaid',
+          customer: 'cus_test',
+          client_reference_id: 'signup-id',
+          metadata: { pending_signup_id: 'signup-id', plan_code: 'monthly' }
+        }),
+        create: async (params, options) => {
+          checkoutCalls.push({ params, options });
+          return { id: 'cs_test_87654321', url: 'https://checkout.stripe.com/new' };
+        }
+      }
+    }
+  };
+  const service = createGuestSignupService({ pool, stripe });
+
+  const result = await service.retryPaymentRecovery(token);
+  assert.deepEqual(result, { checkout_url: 'https://checkout.stripe.com/new' });
+  assert.equal(checkoutCalls.length, 1);
+  assert.equal(checkoutCalls[0].params.client_reference_id, 'signup-id');
+  assert.equal(checkoutCalls[0].params.metadata.price_id, 'price_monthly');
+  assert.equal(checkoutCalls[0].params.subscription_data.metadata.price_id, 'price_monthly');
+  assert.match(checkoutCalls[0].options.idempotencyKey, /^pos-guest-checkout-/);
+});
+
+test('does not create another checkout while Stripe payment is still pending', async () => {
+  const token = 'p'.repeat(43);
+  const service = createGuestSignupService({
+    pool: {
+      execute: async () => [[{
+        id: 'signup-id',
+        email: 'ana@example.com',
+        nombre_org: 'Tienda',
+        stripe_customer_id: 'cus_test',
+        stripe_checkout_session_id: 'cs_test_12345678',
+        status: 'checkout_created',
+        recovery_valid: 1,
+        plan_name: 'Plan mensual',
+        plan_amount: 299,
+        plan_currency: 'MXN'
+      }], []],
+      getConnection: async () => { throw new Error('No transaction expected'); }
+    },
+    stripe: {
+      checkout: {
+        sessions: {
+          retrieve: async () => ({
+            id: 'cs_test_12345678',
+            mode: 'subscription',
+            status: 'open',
+            payment_status: 'unpaid',
+            customer: 'cus_test',
+            client_reference_id: 'signup-id',
+            metadata: { pending_signup_id: 'signup-id', plan_code: 'monthly' },
+            url: 'https://checkout.stripe.com/session'
+          }),
+          create: async () => { throw new Error('A duplicate checkout must not be created'); }
+        }
+      }
+    }
+  });
+
+  await assert.rejects(
+    service.retryPaymentRecovery(token),
+    (error) => error.code === 'PAYMENT_RETRY_NOT_ALLOWED' && error.status === 409
+  );
+});

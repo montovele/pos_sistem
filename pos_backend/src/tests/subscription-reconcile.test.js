@@ -37,7 +37,8 @@ function createCheckoutSession(paymentStatus = 'paid') {
     subscription: 'sub_test_123',
     metadata: {
       pending_signup_id: 'signup-test-id',
-      plan_code: 'monthly'
+      plan_code: 'monthly',
+      price_id: 'price_test'
     }
   };
 }
@@ -57,7 +58,7 @@ test('manually reconciles a paid guest checkout without the webhook', async () =
           id: 'sub_test_123',
           customer: 'cus_test_123',
           status: 'active',
-          metadata: { pending_signup_id: 'signup-test-id', plan_code: 'monthly' },
+          metadata: { pending_signup_id: 'signup-test-id', plan_code: 'monthly', price_id: 'price_test' },
           items: { data: [{ price: { id: 'price_test' } }] },
           current_period_start: 1793750400,
           current_period_end: 1796342400,
@@ -100,6 +101,35 @@ test('does not provision an unpaid guest checkout during reconciliation', async 
   assert.deepEqual(result, { payment_confirmed: false, status: 'processing' });
   assert.equal(provisioned, false);
   assert.equal(pool.statements.length, 0);
+});
+
+test('does not activate a paid checkout with a different Stripe price', async () => {
+  const pool = createPool();
+  const session = createCheckoutSession();
+  let provisioned = false;
+  const service = createPosSubscriptionService({
+    pool,
+    stripe: {
+      checkout: { sessions: { retrieve: async () => session } },
+      subscriptions: {
+        retrieve: async () => ({
+          id: 'sub_test_123',
+          customer: 'cus_test_123',
+          status: 'active',
+          metadata: { pending_signup_id: 'signup-test-id', plan_code: 'monthly', price_id: 'price_test' },
+          items: { data: [{ price: { id: 'price_unexpected' } }] }
+        })
+      }
+    },
+    guestSignupService: {
+      provisionPaidCheckout: async () => { provisioned = true; },
+      sendActivationEmail: async () => {}
+    }
+  });
+
+  const result = await service.reconcileGuestCheckout(session.id);
+  assert.deepEqual(result, { payment_confirmed: false, status: 'processing' });
+  assert.equal(provisioned, false);
 });
 
 test('acknowledges guest subscription events that arrive before checkout provisioning', async () => {

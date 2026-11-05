@@ -611,10 +611,18 @@ export function createPosSubscriptionService({ pool, stripe = null, guestSignupS
     const subscriptionCustomerId = typeof subscription.customer === 'string'
       ? subscription.customer
       : subscription.customer?.id;
+    const subscriptionPriceIds = (subscription.items?.data || [])
+      .map((item) => typeof item.price === 'string' ? item.price : item.price?.id)
+      .filter(Boolean);
+    const expectedPriceId = session.metadata.price_id || subscription.metadata?.price_id;
     if (
       subscriptionCustomerId !== sessionCustomerId
       || subscription.metadata?.pending_signup_id !== session.metadata.pending_signup_id
       || subscription.metadata?.plan_code !== PLAN_CODE
+      || (expectedPriceId && !subscriptionPriceIds.includes(expectedPriceId))
+      || (session.metadata.price_id
+        && subscription.metadata?.price_id !== session.metadata.price_id)
+      || subscriptionPriceIds.length === 0
       || !ACTIVE_STATUSES.has(subscription.status)
     ) {
       return { payment_confirmed: false, status: 'processing' };

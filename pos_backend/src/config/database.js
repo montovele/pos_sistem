@@ -399,8 +399,12 @@ const ensureSubscriptionSchema = async (connection) => {
       user_id INT DEFAULT NULL,
       account_email_sent_at DATETIME DEFAULT NULL,
       account_email_last_attempt_at DATETIME DEFAULT NULL,
+      recovery_token_hash CHAR(64) DEFAULT NULL,
+      recovery_token_expires_at DATETIME DEFAULT NULL,
+      recovery_last_sent_at DATETIME DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_pos_pending_recovery_token (recovery_token_hash),
       INDEX idx_pos_pending_signups_status (status, created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
@@ -408,6 +412,28 @@ const ensureSubscriptionSchema = async (connection) => {
   if (!pendingSignupColumns.some((column) => column.Field === 'account_email_last_attempt_at')) {
     await connection.execute(
       'ALTER TABLE pos_pending_signups ADD COLUMN account_email_last_attempt_at DATETIME DEFAULT NULL AFTER account_email_sent_at'
+    );
+  }
+  const pendingSignupColumnNames = new Set(pendingSignupColumns.map((column) => column.Field));
+  if (!pendingSignupColumnNames.has('recovery_token_hash')) {
+    await connection.execute(
+      'ALTER TABLE pos_pending_signups ADD COLUMN recovery_token_hash CHAR(64) DEFAULT NULL AFTER account_email_last_attempt_at'
+    );
+  }
+  if (!pendingSignupColumnNames.has('recovery_token_expires_at')) {
+    await connection.execute(
+      'ALTER TABLE pos_pending_signups ADD COLUMN recovery_token_expires_at DATETIME DEFAULT NULL AFTER recovery_token_hash'
+    );
+  }
+  if (!pendingSignupColumnNames.has('recovery_last_sent_at')) {
+    await connection.execute(
+      'ALTER TABLE pos_pending_signups ADD COLUMN recovery_last_sent_at DATETIME DEFAULT NULL AFTER recovery_token_expires_at'
+    );
+  }
+  const [pendingSignupIndexes] = await connection.execute('SHOW INDEX FROM pos_pending_signups');
+  if (!pendingSignupIndexes.some((index) => index.Key_name === 'uq_pos_pending_recovery_token')) {
+    await connection.execute(
+      'ALTER TABLE pos_pending_signups ADD UNIQUE KEY uq_pos_pending_recovery_token (recovery_token_hash)'
     );
   }
 

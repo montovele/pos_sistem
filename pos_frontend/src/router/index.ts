@@ -6,6 +6,7 @@ const LoginPage = () => import('@/pages/LoginPage.vue')
 const LandingPage = () => import('@/pages/LandingPage.vue')
 const PlansPage = () => import('@/pages/PlansPage.vue')
 const ActivateAccountPage = () => import('@/pages/ActivateAccountPage.vue')
+const PaymentRecoveryPage = () => import('@/pages/PaymentRecoveryPage.vue')
 const HomePage = () => import('@/pages/HomePage.vue')
 const PosPage = () => import('@/pages/PosPage.vue')
 const ReportsPage = () => import('@/pages/ReportsPage.vue')
@@ -36,6 +37,12 @@ const routes: RouteRecordRaw[] = [
     path: '/activar-cuenta',
     name: 'ActivateAccount',
     component: ActivateAccountPage,
+    meta: { requiresAuth: false }
+  },
+  {
+    path: '/recuperar-pago',
+    name: 'PaymentRecovery',
+    component: PaymentRecoveryPage,
     meta: { requiresAuth: false }
   },
   {
