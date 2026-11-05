@@ -1,5 +1,29 @@
+import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { getPool } from '../config/database.js';
 import { demoUsers } from '../data/demoData.js';
+
+export function hashPassword(password) {
+  const salt = randomBytes(16);
+  const hash = scryptSync(String(password), salt, 64);
+  return `scrypt$${salt.toString('base64')}$${hash.toString('base64')}`;
+}
+
+export function verifyPassword(password, storedPassword) {
+  const stored = String(storedPassword || '');
+  if (!stored.startsWith('scrypt$')) return stored === String(password || '');
+
+  const [, encodedSalt, encodedHash] = stored.split('$');
+  if (!encodedSalt || !encodedHash) return false;
+  try {
+    const salt = Buffer.from(encodedSalt, 'base64');
+    const expected = Buffer.from(encodedHash, 'base64');
+    if (salt.length !== 16 || expected.length !== 64) return false;
+    const actual = scryptSync(String(password || ''), salt, expected.length);
+    return timingSafeEqual(actual, expected);
+  } catch {
+    return false;
+  }
+}
 
 export const authService = {
   async login({ username, password }, mysqlAvailable) {
@@ -49,7 +73,7 @@ export const authService = {
       const user = rows[0];
       console.log('[AUTH SERVICE] resultado de consulta MySQL:', user ? 'usuario encontrado' : 'usuario no encontrado');
 
-      if (!user || String(user.password) !== String(password)) {
+      if (!user || !verifyPassword(password, user.password)) {
         console.warn('[AUTH SERVICE] credenciales MySQL rechazadas');
         return { error: 'Credenciales inválidas', status: 401 };
       }

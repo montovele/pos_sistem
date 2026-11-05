@@ -1,0 +1,1 @@
+stripe listen --forward-to http://localhost:4080/api/suscripciones/webhook --events checkout.session.completed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,invoice.paid,invoice.payment_failed

@@ -41,9 +41,8 @@ const ensureLegacyCompatibilitySchema = async (connection) => {
   `);
 
   await connection.execute(`
-    INSERT INTO organizaciones (id, nombre_org, ruc, correo, activo)
+    INSERT IGNORE INTO organizaciones (id, nombre_org, ruc, correo, activo)
     VALUES (1, 'Empresa Demo', 'XAXX010101000', 'contacto@empresa-demo.local', 1)
-    ON DUPLICATE KEY UPDATE nombre_org = VALUES(nombre_org), correo = VALUES(correo), activo = VALUES(activo)
   `);
 
   await connection.execute(`
@@ -319,11 +318,184 @@ const ensureInventorySchema = async (connection) => {
   }
 };
 
+const ensureSubscriptionSchema = async (connection) => {
+  const superAdminUsername = String(process.env.SUPERADMIN_USERNAME || '').trim();
+  if (superAdminUsername) {
+    const [result] = await connection.execute(
+      "UPDATE usuarios SET role = 'superadmin' WHERE username = ?",
+      [superAdminUsername]
+    );
+    if (!result.affectedRows) {
+      console.warn('[AUTH] SUPERADMIN_USERNAME no coincide con ningún usuario existente.');
+    }
+  }
+
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS pos_subscription_plans (
+      code VARCHAR(40) PRIMARY KEY,
+      name VARCHAR(120) NOT NULL,
+      description VARCHAR(255) DEFAULT NULL,
+      amount DECIMAL(10,2) NOT NULL,
+      currency CHAR(3) NOT NULL DEFAULT 'MXN',
+      interval_unit VARCHAR(10) NOT NULL DEFAULT 'month',
+      interval_count INT UNSIGNED NOT NULL DEFAULT 1,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      stripe_product_id VARCHAR(120) DEFAULT NULL,
+      stripe_price_id VARCHAR(120) DEFAULT NULL,
+      updated_by INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  await connection.execute(`
+    INSERT IGNORE INTO pos_subscription_plans
+      (code, name, description, amount, currency, interval_unit, interval_count)
+    VALUES ('monthly', 'Suscripción mensual', 'Acceso mensual al sistema POS', 599.00, 'MXN', 'month', 1)
+  `);
+  const [planColumns] = await connection.execute('SHOW COLUMNS FROM pos_subscription_plans');
+  if (!planColumns.some((column) => column.Field === 'is_active')) {
+    await connection.execute('ALTER TABLE pos_subscription_plans ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1 AFTER interval_count');
+  }
+
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS pos_subscription_price_history (
+      id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+      plan_code VARCHAR(40) NOT NULL,
+      amount DECIMAL(10,2) NOT NULL,
+      currency CHAR(3) NOT NULL,
+      interval_unit VARCHAR(10) NOT NULL,
+      interval_count INT UNSIGNED NOT NULL DEFAULT 1,
+      stripe_price_id VARCHAR(120) NOT NULL UNIQUE,
+      status VARCHAR(20) NOT NULL DEFAULT 'active',
+      created_by INT DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_pos_subscription_price_plan (plan_code, status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS pos_subscription_customers (
+      organization_id INT PRIMARY KEY,
+      stripe_customer_id VARCHAR(120) NOT NULL UNIQUE,
+      email VARCHAR(150) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS pos_pending_signups (
+      id CHAR(36) PRIMARY KEY,
+      idempotency_key VARCHAR(64) NOT NULL,
+      nombre_org VARCHAR(100) NOT NULL,
+      nombre VARCHAR(100) NOT NULL,
+      apellido VARCHAR(100) NOT NULL,
+      email VARCHAR(150) NOT NULL UNIQUE,
+      telefono VARCHAR(20) DEFAULT NULL,
+      stripe_customer_id VARCHAR(120) DEFAULT NULL UNIQUE,
+      stripe_checkout_session_id VARCHAR(120) DEFAULT NULL UNIQUE,
+      status VARCHAR(30) NOT NULL DEFAULT 'checkout_pending',
+      organization_id INT DEFAULT NULL,
+      user_id INT DEFAULT NULL,
+      account_email_sent_at DATETIME DEFAULT NULL,
+      account_email_last_attempt_at DATETIME DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_pos_pending_signups_status (status, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  const [pendingSignupColumns] = await connection.execute('SHOW COLUMNS FROM pos_pending_signups');
+  if (!pendingSignupColumns.some((column) => column.Field === 'account_email_last_attempt_at')) {
+    await connection.execute(
+      'ALTER TABLE pos_pending_signups ADD COLUMN account_email_last_attempt_at DATETIME DEFAULT NULL AFTER account_email_sent_at'
+    );
+  }
+
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS pos_account_setup_tokens (
+      id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+      user_id INT NOT NULL,
+      token_hash CHAR(64) NOT NULL UNIQUE,
+      expires_at DATETIME NOT NULL,
+      consumed_at DATETIME DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_pos_account_setup_user (user_id, consumed_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS pos_subscriptions (
+      id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+      organization_id INT NOT NULL,
+      plan_code VARCHAR(40) NOT NULL,
+      stripe_customer_id VARCHAR(120) DEFAULT NULL,
+      stripe_subscription_id VARCHAR(120) DEFAULT NULL UNIQUE,
+      stripe_price_id VARCHAR(120) DEFAULT NULL,
+      status VARCHAR(30) NOT NULL,
+      current_period_start DATETIME DEFAULT NULL,
+      current_period_end DATETIME DEFAULT NULL,
+      cancel_at_period_end TINYINT(1) NOT NULL DEFAULT 0,
+      canceled_at DATETIME DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_pos_subscriptions_org (organization_id, id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  const [subscriptionColumns] = await connection.execute('SHOW COLUMNS FROM pos_subscriptions');
+  if (subscriptionColumns.some((column) => column.Field === 'stripe_subscription_id' && column.Null === 'NO')) {
+    await connection.execute('ALTER TABLE pos_subscriptions MODIFY COLUMN stripe_subscription_id VARCHAR(120) DEFAULT NULL');
+  }
+  if (!subscriptionColumns.some((column) => column.Field === 'current_period_start')) {
+    await connection.execute('ALTER TABLE pos_subscriptions ADD COLUMN current_period_start DATETIME DEFAULT NULL AFTER status');
+  }
+
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS pos_subscription_events (
+      event_id VARCHAR(120) PRIMARY KEY,
+      event_type VARCHAR(120) NOT NULL,
+      processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS pos_subscription_payments (
+      id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+      organization_id INT NOT NULL,
+      stripe_invoice_id VARCHAR(120) NOT NULL UNIQUE,
+      stripe_subscription_id VARCHAR(120) DEFAULT NULL,
+      stripe_payment_intent_id VARCHAR(120) DEFAULT NULL,
+      invoice_number VARCHAR(80) DEFAULT NULL,
+      amount_paid_minor BIGINT UNSIGNED NOT NULL,
+      currency CHAR(3) NOT NULL,
+      status VARCHAR(30) NOT NULL,
+      paid_at DATETIME DEFAULT NULL,
+      hosted_invoice_url VARCHAR(500) DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_pos_subscription_payments_org (organization_id, paid_at, id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS pos_subscription_audit (
+      id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+      organization_id INT DEFAULT NULL,
+      actor_user_id INT DEFAULT NULL,
+      action VARCHAR(80) NOT NULL,
+      details_json JSON DEFAULT NULL,
+      ip_address VARCHAR(45) DEFAULT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_pos_subscription_audit_org (organization_id, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+};
+
 export const initializeDatabase = async () => {
   try {
     const connection = await getPool().getConnection();
     await ensureLegacyCompatibilitySchema(connection);
     await ensureInventorySchema(connection);
+    await ensureSubscriptionSchema(connection);
     connection.release();
     return true;
   } catch (error) {

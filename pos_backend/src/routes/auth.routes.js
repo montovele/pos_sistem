@@ -1,9 +1,12 @@
 import express from 'express';
 import requireAuth from '../middleware/auth.js';
 import { authService } from '../services/authService.js';
+import { getPool } from '../config/database.js';
+import { createGuestSignupService } from '../services/guestSignupService.js';
 import { jsonSuccess } from '../utils/response.js';
 
 const router = express.Router();
+const accountSetupService = createGuestSignupService({ pool: getPool() });
 
 router.post('/login', async (req, res) => {
   const { username, password } = req.body || {};
@@ -40,6 +43,19 @@ router.post('/login', async (req, res) => {
 router.post('/logout', (_req, res) => {
   console.log('[AUTH /logout] cierre de sesión solicitado');
   res.json(jsonSuccess({ ok: true }));
+});
+
+router.post('/activate-account', async (req, res) => {
+  try {
+    const result = await accountSetupService.activateAccount(req.body?.token, req.body?.password);
+    return res.json(jsonSuccess(result));
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      success: false,
+      code: error.code || 'ACCOUNT_ACTIVATION_FAILED',
+      message: error.status ? error.message : 'No se pudo activar la cuenta.'
+    });
+  }
 });
 
 router.get('/me', requireAuth, (req, res) => {

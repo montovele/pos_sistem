@@ -1,6 +1,13 @@
 import { getPool } from '../config/database.js';
 import { demoUsers } from '../data/demoData.js';
 
+export function shouldEnforceSubscription(user, requestPath) {
+  if (user?.role === 'superadmin') return false;
+  if (requestPath.startsWith('/api/auth/')) return false;
+  if (requestPath === '/api/suscripciones' || requestPath.startsWith('/api/suscripciones/')) return false;
+  return true;
+}
+
 const requireAuth = async (req, res, next) => {
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
@@ -74,6 +81,29 @@ const requireAuth = async (req, res, next) => {
       photo: ''
     };
     req.organization = { id: req.user.organizationId, name: req.user.organizationName || 'Empresa Demo', status: 'active' };
+
+    const requestPath = req.originalUrl.split('?')[0];
+    if (shouldEnforceSubscription(req.user, requestPath)) {
+      const [subscriptions] = await getPool().execute(
+        `SELECT status,
+                (status IN ('active', 'trialing')
+                 AND (current_period_start IS NULL OR current_period_start <= UTC_TIMESTAMP())
+                 AND (current_period_end IS NULL OR current_period_end > UTC_TIMESTAMP())) AS access_allowed
+         FROM pos_subscriptions
+         WHERE organization_id = ?
+         ORDER BY id DESC
+         LIMIT 1`,
+        [req.user.organizationId]
+      );
+      if (!subscriptions[0]?.access_allowed) {
+        return res.status(402).json({
+          success: false,
+          code: 'SUBSCRIPTION_REQUIRED',
+          message: 'La suscripción mensual está vencida o no se ha activado. Renueva el plan para continuar.',
+          subscription_status: subscriptions[0]?.status || 'inactive'
+        });
+      }
+    }
 
     console.log('[AUTH] usuario autenticado:', req.user.username, 'ruta:', req.originalUrl);
     return next();

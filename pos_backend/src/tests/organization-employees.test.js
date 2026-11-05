@@ -23,6 +23,46 @@ const main = async () => {
   assert.ok(cashierList.every((employee) => employee.role === 'cashier'), 'El filtro por rol debe limitar a cajeros');
 
   const adminSession = { ...login.user, nombreEmpleado: 'Administrador', numeroEmpleado: 1, organizationId: 1 };
+
+  const createdAdmin = await employeeService.create({
+    username: 'admin-secundario',
+    role: 'admin',
+    password: 'temporary-password'
+  }, { role: 'superadmin', organizationId: 1 });
+  assert.equal(createdAdmin.role, 'admin', 'El superadministrador debe poder crear otro administrador');
+
+  const createdManager = await employeeService.create({
+    username: 'gerente-demo',
+    role: 'manager',
+    password: 'temporary-password',
+    organizationId: 999
+  }, adminSession);
+  assert.equal(createdManager.role, 'manager', 'El administrador debe poder crear roles inferiores');
+  assert.equal(createdManager.organizationId, 1, 'El empleado debe quedar en la organización de la sesión y no en la enviada por el formulario');
+
+  const forbiddenAdmin = await employeeService.create({
+    username: 'admin-no-autorizado',
+    role: 'admin',
+    password: 'temporary-password'
+  }, adminSession);
+  assert.equal(forbiddenAdmin.status, 403, 'Un administrador no debe poder crear otro administrador');
+
+  const forbiddenPromotion = await employeeService.update(createdManager.id, {
+    role: 'admin'
+  }, adminSession);
+  assert.equal(forbiddenPromotion.status, 403, 'Un administrador no debe poder promover a otro usuario a administrador');
+
+  const promotedManager = await employeeService.update(createdManager.id, {
+    role: 'admin'
+  }, { role: 'superadmin', organizationId: 1 });
+  assert.equal(promotedManager.role, 'admin', 'El superadministrador debe poder asignar el rol administrador al editar');
+
+  const unchangedAdmin = await employeeService.update(createdAdmin.id, {
+    role: 'admin',
+    nombre: 'Administrador secundario'
+  }, adminSession);
+  assert.equal(unchangedAdmin.role, 'admin', 'Un cambio de datos no debe fallar por mantener el rol actual');
+
   await cajaService.abrir({ baseCaja: 200 }, adminSession);
   const transaction = await transactionService.create({
     items: [{

@@ -1,5 +1,6 @@
 import { getPool } from '../config/database.js';
 import { demoUsers } from '../data/demoData.js';
+import { canAssignRole } from '../utils/rolePermissions.js';
 
 const normalizeEmployee = (row) => ({
   id: Number(row.id),
@@ -113,11 +114,14 @@ export const employeeService = {
   },
 
   async create(payload = {}, actor = {}) {
-    const organizationId = Number(actor.organizationId || payload.organizationId || payload.organizacionId || 1);
+    const organizationId = Number(actor.organizationId);
+    if (!Number.isInteger(organizationId) || organizationId < 1) {
+      return { error: 'La organización de la sesión no es válida', status: 401 };
+    }
     const role = String(payload.role || 'cashier');
 
-    if (role !== 'cashier') {
-      return { error: 'Solo se permite crear cajeros en esta versión', status: 400 };
+    if (!canAssignRole(actor.role, role)) {
+      return { error: 'No tienes permisos para asignar ese rol', status: 403 };
     }
 
     if (!global.mysqlAvailable) {
@@ -136,7 +140,7 @@ export const employeeService = {
         apellido: lastName,
         email,
         numeroEmpleado: Number(employeeNumber),
-        role: 'cashier',
+        role,
         active: true,
         activo: true,
         organizationId,
@@ -175,10 +179,18 @@ export const employeeService = {
   },
 
   async update(id, payload = {}, actor = {}) {
-    const organizationId = Number(actor.organizationId || payload.organizationId || payload.organizacionId || 1);
-
-    if (payload.role && String(payload.role) !== 'cashier') {
-      return { error: 'No está permitido cambiar el rol del empleado', status: 400 };
+    const organizationId = Number(actor.organizationId);
+    if (!Number.isInteger(organizationId) || organizationId < 1) {
+      return { error: 'La organización de la sesión no es válida', status: 401 };
+    }
+    const nextRole = payload.role === undefined ? null : String(payload.role);
+    const currentEmployee = await this.findById(id, organizationId);
+    if (!currentEmployee) return null;
+    if (currentEmployee.role === 'superadmin' && actor.role !== 'superadmin') {
+      return { error: 'Solo un superadministrador puede modificar ese usuario', status: 403 };
+    }
+    if (nextRole && nextRole !== currentEmployee.role && !canAssignRole(actor.role, nextRole)) {
+      return { error: 'No tienes permisos para asignar ese rol', status: 403 };
     }
 
     if (!global.mysqlAvailable) {
@@ -202,7 +214,7 @@ export const employeeService = {
         active: payload.active ?? payload.activo ?? current.active ?? current.activo,
         activo: payload.activo ?? payload.active ?? current.activo ?? current.active,
         organizationId: organizationId,
-        role: 'cashier'
+        role: nextRole || current.role
       };
       demoUsers[index] = next;
       return normalizeEmployee(next);
@@ -219,6 +231,7 @@ export const employeeService = {
       if (payload.numeroEmpleado !== undefined || payload.employeeNumber !== undefined) { updates.push('numero_empleado = ?'); values.push(Number(payload.numeroEmpleado ?? payload.employeeNumber)); }
       if (payload.active !== undefined || payload.activo !== undefined) { updates.push('activo = ?'); values.push(payload.active ?? payload.activo ? 1 : 0); }
       if (payload.password !== undefined) { updates.push('password = ?'); values.push(String(payload.password)); }
+      if (nextRole) { updates.push('role = ?'); values.push(nextRole); }
 
       if (!updates.length) {
         return null;
@@ -244,6 +257,12 @@ export const employeeService = {
 
   async activate(id, actor = {}) {
     const organizationId = Number(actor.organizationId || 1);
+    const employee = await this.findById(id, organizationId);
+    if (!employee) return null;
+    if (employee.role === 'superadmin' && actor.role !== 'superadmin') {
+      return { error: 'Solo un superadministrador puede modificar ese usuario', status: 403 };
+    }
+
     if (!global.mysqlAvailable) {
       const index = demoUsers.findIndex((user) => Number(user.id) === Number(id) && Number(user.organizationId ?? 1) === organizationId);
       if (index === -1) return null;
@@ -263,6 +282,12 @@ export const employeeService = {
 
   async deactivate(id, actor = {}) {
     const organizationId = Number(actor.organizationId || 1);
+    const employee = await this.findById(id, organizationId);
+    if (!employee) return null;
+    if (employee.role === 'superadmin' && actor.role !== 'superadmin') {
+      return { error: 'Solo un superadministrador puede modificar ese usuario', status: 403 };
+    }
+
     if (!global.mysqlAvailable) {
       const index = demoUsers.findIndex((user) => Number(user.id) === Number(id) && Number(user.organizationId ?? 1) === organizationId);
       if (index === -1) return null;
@@ -283,6 +308,11 @@ export const employeeService = {
   async resetPassword(id, payload = {}, actor = {}) {
     const organizationId = Number(actor.organizationId || 1);
     const password = String(payload.password || payload.temporaryPassword || '1234');
+    const employee = await this.findById(id, organizationId);
+    if (!employee) return null;
+    if (employee.role === 'superadmin' && actor.role !== 'superadmin') {
+      return { error: 'Solo un superadministrador puede modificar ese usuario', status: 403 };
+    }
 
     if (!global.mysqlAvailable) {
       const index = demoUsers.findIndex((user) => Number(user.id) === Number(id) && Number(user.organizationId ?? 1) === organizationId);
@@ -300,15 +330,15 @@ export const employeeService = {
     }
   },
 
-  async remove(id) {
+  async remove(id, actor = {}) {
     if (!global.mysqlAvailable) {
       return null;
     }
 
     try {
       const [rows] = await getPool().execute(
-        'SELECT id, username, nombre, apellido, email, numero_empleado, organization_id, role, activo FROM usuarios WHERE id = ? LIMIT 1',
-        [Number(id)]
+        'SELECT id, username, nombre, apellido, email, numero_empleado, organization_id, role, activo FROM usuarios WHERE id = ? AND organization_id = ? LIMIT 1',
+        [Number(id), Number(actor.organizationId || 1)]
       );
 
       if (!rows[0]) {
@@ -316,7 +346,10 @@ export const employeeService = {
       }
 
       const employee = normalizeEmployee(rows[0]);
-      await getPool().execute('DELETE FROM usuarios WHERE id = ?', [Number(id)]);
+      if (employee.role === 'superadmin' && actor.role !== 'superadmin') {
+        return { error: 'Solo un superadministrador puede modificar ese usuario', status: 403 };
+      }
+      await getPool().execute('DELETE FROM usuarios WHERE id = ? AND organization_id = ?', [Number(id), Number(actor.organizationId || 1)]);
       return employee;
     } catch (error) {
       console.error('[EMPLOYEE SERVICE] Error eliminando empleado:', error.message);

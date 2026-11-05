@@ -29,36 +29,33 @@
 
         <div class="form-group">
           <label>Nombre de Negocio</label>
-          <input v-model="settings.businessName" type="text" placeholder="Nombre de tu negocio" />
+          <input v-model="settings.businessName" type="text" placeholder="Nombre de tu negocio" :disabled="isLoadingSettings" />
         </div>
 
         <div class="form-group">
           <label>RUC / NIT</label>
-          <input v-model="settings.businessRuc" type="text" placeholder="Identificación fiscal" />
+          <input v-model="settings.businessRuc" type="text" placeholder="Identificación fiscal" :disabled="isLoadingSettings" />
         </div>
 
         <div class="form-group">
           <label>Email de Contacto</label>
-          <input v-model="settings.email" type="email" placeholder="email@negocio.com" />
+          <input v-model="settings.email" type="email" placeholder="email@negocio.com" :disabled="isLoadingSettings" />
         </div>
 
         <div class="form-group">
           <label>Teléfono</label>
-          <input v-model="settings.phone" type="tel" placeholder="+1 234 567 890" />
+          <input v-model="settings.phone" type="tel" placeholder="Teléfono de contacto" :disabled="isLoadingSettings" />
         </div>
 
         <div class="form-group">
           <label>Dirección</label>
-          <textarea v-model="settings.address" placeholder="Dirección completa del negocio"></textarea>
+          <textarea v-model="settings.address" placeholder="Dirección completa del negocio" :disabled="isLoadingSettings"></textarea>
         </div>
 
-        <div class="form-group">
-          <label>Logo (URL)</label>
-          <input v-model="settings.logo" type="url" placeholder="https://..." />
-          <img v-if="settings.logo" :src="settings.logo" class="logo-preview" alt="Logo" />
-        </div>
-
-        <button @click="saveSettings" class="btn-save">💾 Guardar Cambios</button>
+        <p v-if="isLoadingSettings" class="empty-state">Cargando información registrada de la organización...</p>
+        <button @click="saveSettings" class="btn-save" :disabled="isLoadingSettings || isSavingSettings">
+          {{ isSavingSettings ? 'Guardando...' : '💾 Guardar Cambios' }}
+        </button>
       </div>
 
       <!-- 2. Usuarios y Roles -->
@@ -70,54 +67,13 @@
             <div class="user-info">
               <h3>{{ user.nombreEmpleado }}</h3>
               <p>{{ user.email }}</p>
-              <span :class="'role-badge ' + user.role">{{ user.role }}</span>
-            </div>
-            <div class="user-actions">
-              <button @click="editUser(user)" class="btn-small">✏️ Editar</button>
-              <button @click="deleteUser(user.id)" class="btn-small btn-danger">🗑️ Eliminar</button>
+              <span :class="'role-badge ' + user.role">{{ roleLabel(user.role) }}</span>
             </div>
           </div>
+          <p v-if="isLoadingUsers" class="empty-state">Cargando usuarios de la organización...</p>
+          <p v-else-if="!users.length" class="empty-state">No hay usuarios registrados en esta organización.</p>
         </div>
-
-        <button @click="openNewUserForm" class="btn-primary">➕ Nuevo Usuario</button>
-
-        <!-- Formulario agregar usuario -->
-        <div v-if="showAddUserForm" class="modal-overlay" @click="showAddUserForm = false">
-          <div class="modal" @click.stop>
-            <h3>{{ editingUserId ? 'Editar Usuario' : 'Nuevo Usuario' }}</h3>
-
-            <div class="form-group">
-              <label>Nombre</label>
-              <input v-model="newUser.nombreEmpleado" type="text" />
-            </div>
-
-            <div class="form-group">
-              <label>Email</label>
-              <input v-model="newUser.email" type="email" />
-            </div>
-
-            <div class="form-group">
-              <label>Rol</label>
-              <select v-model="newUser.role">
-                <option value="cashier">Cajero</option>
-                <option value="manager">Gerente</option>
-                <option value="admin">Administrador</option>
-              </select>
-            </div>
-
-            <div v-if="editingUserId" class="form-group checkbox-group">
-              <label>
-                <input v-model="newUser.active" type="checkbox" />
-                Usuario activo
-              </label>
-            </div>
-
-            <div class="modal-actions">
-              <button @click="saveUser" class="btn-primary">{{ editingUserId ? 'Guardar cambios' : 'Crear' }}</button>
-              <button @click="showAddUserForm = false" class="btn-secondary">Cancelar</button>
-            </div>
-          </div>
-        </div>
+        <RouterLink class="btn-primary manage-users-link" to="/empleados">Ir a gestión de empleados</RouterLink>
       </div>
 
       <!-- 3. Empresa / Negocio -->
@@ -135,19 +91,19 @@
         <h3>Estadísticas</h3>
         <div class="stats-grid">
           <div class="stat-card">
-            <div class="stat-value">{{ totalEmployees }}</div>
+            <div class="stat-value">{{ organizationSummary.employeesCount }}</div>
             <div class="stat-label">Empleados</div>
           </div>
           <div class="stat-card">
-            <div class="stat-value">{{ totalCashiers }}</div>
-            <div class="stat-label">Cajas Activas</div>
+            <div class="stat-value">{{ organizationSummary.activeCashiersCount }}</div>
+            <div class="stat-label">Cajeros activos</div>
           </div>
           <div class="stat-card">
-            <div class="stat-value">{{ totalProducts }}</div>
+            <div class="stat-value">{{ organizationSummary.productsCount }}</div>
             <div class="stat-label">Productos</div>
           </div>
           <div class="stat-card">
-            <div class="stat-value">{{ totalTransactions }}</div>
+            <div class="stat-value">{{ organizationSummary.transactionsCount }}</div>
             <div class="stat-label">Transacciones</div>
           </div>
         </div>
@@ -162,20 +118,22 @@
             <div class="printer-info">
               <h3>{{ printer.name }}</h3>
               <p>Modelo: {{ printer.model }}</p>
-              <p>Estado: <span :class="'status ' + (printer.active ? 'online' : 'offline')">
-                {{ printer.active ? '🟢 En línea' : '🔴 Offline' }}
+              <p>Estado: <span :class="'status ' + (printer.connected ? 'online' : 'offline')">
+                {{ printer.connected ? '🟢 Conectada' : '🔴 Desconectada' }}
               </span></p>
             </div>
             <div class="printer-actions">
               <button @click="testPrinter" :disabled="isTestingPrinter" class="btn-small">
                 {{ isTestingPrinter ? '⏳ Probando...' : '🖨️ Prueba' }}
               </button>
-              <button @click="editPrinter(printer.id)" class="btn-small">✏️ Editar</button>
             </div>
           </div>
+          <p v-if="isLoadingPrinters" class="empty-state">Consultando el agente local...</p>
+          <p v-else-if="printerError" class="empty-state">{{ printerError }}</p>
+          <p v-else-if="!printers.length" class="empty-state">El agente local no reportó impresoras conectadas.</p>
         </div>
 
-        <button @click="showAddPrinterForm = true" class="btn-primary">➕ Agregar Impresora</button>
+        <p v-if="printersSimulated" class="empty-state">El agente está en modo simulado; no representa una impresora física.</p>
       </div>
 
       <!-- 5. Respaldos -->
@@ -213,7 +171,6 @@
             📥 Descargar último en {{ downloadFormat.toUpperCase() }}
           </button>
 
-          <button @click="scheduleAutoBackup" class="btn-secondary">🔄 Programar Automático</button>
         </div>
 
         <h3>Historial de Respaldos</h3>
@@ -225,6 +182,7 @@
               <button @click="restoreBackup(backup.id)" class="btn-small">↩️ Restaurar</button>
             </div>
           </div>
+          <p v-if="!backups.length" class="empty-state">No hay respaldos registrados para esta organización.</p>
         </div>
       </div>
     </div>
@@ -240,79 +198,47 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/authStore'
-import { useProductStore } from '@/stores/productStore'
-import { useTransactionStore } from '@/stores/transactionStore'
 import { api } from '@/services/api'
 import { hardwareAgent } from '@/services/hardwareAgent'
 
 const authStore = useAuthStore()
-const productStore = useProductStore()
-const transactionStore = useTransactionStore()
 
 // Estado
 const activeTab = ref<'general' | 'users' | 'company' | 'printers' | 'backups'>('general')
 const successMessage = ref('')
 const errorMessage = ref('')
+const isLoadingSettings = ref(false)
+const isSavingSettings = ref(false)
+const isLoadingUsers = ref(false)
+const isLoadingPrinters = ref(false)
+const printerError = ref('')
+const printersSimulated = ref(false)
 
 const tabs = ['general', 'users', 'company', 'printers', 'backups'] as const
 
 // Settings generales
 const settings = ref({
-  businessName: 'Mi Negocio POS',
-  businessRuc: '123456789-0',
-  email: 'contacto@negocio.com',
-  phone: '+1 234 567 890',
-  address: 'Calle Principal 123',
-  logo: 'https://via.placeholder.com/150'
+  businessName: '',
+  businessRuc: '',
+  email: '',
+  phone: '',
+  address: ''
 })
 
 // Usuarios
-const users = ref([
-  {
-    id: 1,
-    nombreEmpleado: 'Juan Pérez',
-    email: 'juan@example.com',
-    role: 'admin',
-    active: true
-  },
-  {
-    id: 2,
-    nombreEmpleado: 'María García',
-    email: 'maria@example.com',
-    role: 'cashier',
-    active: true
-  }
-])
-
-const showAddUserForm = ref(false)
-const editingUserId = ref<number | null>(null)
-const newUser = ref({
-  nombreEmpleado: '',
-  email: '',
-  role: 'cashier',
-  active: true
-})
+const users = ref<Array<{ id: number; nombreEmpleado: string; email: string; role: string; active: boolean }>>([])
 
 // Impresoras
-const printers = ref([
-  {
-    id: 1,
-    name: 'Impresora Ticket',
-    model: 'Epson TM-T20',
-    active: true
-  },
-  {
-    id: 2,
-    name: 'Impresora A4',
-    model: 'HP LaserJet',
-    active: false
-  }
-])
-
-const showAddPrinterForm = ref(false)
+const printers = ref<Array<{ id: string; name: string; model: string; connected: boolean }>>([])
 const isTestingPrinter = ref(false)
+const organizationSummary = ref({
+  employeesCount: 0,
+  activeCashiersCount: 0,
+  productsCount: 0,
+  transactionsCount: 0
+})
 
 // Respaldos
 const isBackingUp = ref(false)
@@ -322,11 +248,6 @@ const lastBackupDate = ref('Sin respaldos')
 const backups = ref<Array<{ id: number; format: 'json' | 'csv' | 'xlsx'; date: string; size: string }>>([])
 
 // Computed
-const totalEmployees = computed(() => users.value.length)
-const totalCashiers = computed(() => users.value.filter(u => u.role === 'cashier').length)
-const totalProducts = computed(() => productStore.products.length)
-const totalTransactions = computed(() => transactionStore.transactions.length)
-
 // Métodos
 const getTabLabel = (tab: string) => {
   const labels: Record<string, string> = {
@@ -340,23 +261,26 @@ const getTabLabel = (tab: string) => {
 }
 
 const loadOrganizationSettings = async () => {
+  isLoadingSettings.value = true
   try {
     const response: any = await api.get('/organization/settings')
     const data = response?.data?.data || response?.data || {}
     settings.value = {
-      businessName: data.general?.businessName || data.general?.name || settings.value.businessName,
-      businessRuc: data.fiscal?.taxId || settings.value.businessRuc,
-      email: data.general?.email || settings.value.email,
-      phone: data.general?.phone || settings.value.phone,
-      address: data.general?.address || settings.value.address,
-      logo: data.general?.logo || settings.value.logo
+      businessName: data.general?.name || '',
+      businessRuc: data.general?.taxId || '',
+      email: data.general?.email || '',
+      phone: data.general?.phone || '',
+      address: data.general?.address || ''
     }
   } catch (err: any) {
     errorMessage.value = err.message || 'No se pudo cargar la configuración de la empresa'
+  } finally {
+    isLoadingSettings.value = false
   }
 }
 
 const loadUsers = async () => {
+  isLoadingUsers.value = true
   try {
     const response: any = await api.get('/employees')
     const rows = Array.isArray(response?.data) ? response.data : Array.isArray(response?.data?.data) ? response.data.data : []
@@ -369,97 +293,87 @@ const loadUsers = async () => {
     }))
   } catch (err: any) {
     errorMessage.value = err.message || 'No se pudo cargar los empleados'
+  } finally {
+    isLoadingUsers.value = false
   }
 }
 
-const saveSettings = async () => {
+const loadOrganizationSummary = async () => {
   try {
-    await api.patch('/organization', {
+    const response: any = await api.get('/organization/summary')
+    const summary = response?.data?.data || response?.data || {}
+    organizationSummary.value = {
+      employeesCount: Number(summary.employeesCount || 0),
+      activeCashiersCount: Number(summary.activeCashiersCount || 0),
+      productsCount: Number(summary.productsCount || 0),
+      transactionsCount: Number(summary.transactionsCount || 0)
+    }
+  } catch (err: any) {
+    errorMessage.value = err.message || 'No se pudieron cargar las estadísticas de la organización'
+  }
+}
+
+const roleLabel = (role: string) => ({
+  admin: 'Administrador',
+  superadmin: 'Superadministrador',
+  cashier: 'Cajero',
+  manager: 'Gerente',
+  vendedor: 'Vendedor'
+}[role] || role)
+
+const saveSettings = async () => {
+  isSavingSettings.value = true
+  errorMessage.value = ''
+  try {
+    const response: any = await api.patch('/organization', {
       name: settings.value.businessName,
-      businessName: settings.value.businessName,
       taxId: settings.value.businessRuc,
-      businessRuc: settings.value.businessRuc,
       email: settings.value.email,
       phone: settings.value.phone,
-      address: settings.value.address,
-      logo: settings.value.logo
+      address: settings.value.address
     })
-
+    const organization = response?.data?.data || response?.data
+    settings.value = {
+      businessName: organization?.name ?? settings.value.businessName,
+      businessRuc: organization?.taxId ?? settings.value.businessRuc,
+      email: organization?.email ?? settings.value.email,
+      phone: organization?.phone ?? settings.value.phone,
+      address: organization?.address ?? settings.value.address
+    }
+    await authStore.refreshOrganization()
     successMessage.value = 'Configuración guardada correctamente'
     setTimeout(() => {
       successMessage.value = ''
     }, 3000)
   } catch (err: any) {
     errorMessage.value = err.message || 'Error al guardar la configuración'
+  } finally {
+    isSavingSettings.value = false
   }
 }
 
-const openNewUserForm = () => {
-  editingUserId.value = null
-  newUser.value = { nombreEmpleado: '', email: '', role: 'cashier', active: true }
-  showAddUserForm.value = true
-}
-
-const saveUser = async () => {
+const loadPrinterStatus = async () => {
+  isLoadingPrinters.value = true
+  printerError.value = ''
   try {
-    const wasEditing = editingUserId.value !== null
-    const payload = editingUserId.value
-      ? {
-          nombreEmpleado: newUser.value.nombreEmpleado,
-          email: newUser.value.email,
-          role: newUser.value.role,
-          active: newUser.value.active
-        }
-      : {
-          nombreEmpleado: newUser.value.nombreEmpleado,
-          email: newUser.value.email,
-          role: newUser.value.role,
-          active: true,
-          username: newUser.value.email.split('@')[0] || `emp-${Date.now()}`,
-          employeeNumber: String(Date.now()).slice(-6),
-          password: 'temp1234',
-          temporaryPassword: 'temp1234'
-        }
-
-    if (editingUserId.value) {
-      await api.patch(`/employees/${editingUserId.value}`, payload)
-    } else {
-      await api.post('/employees', payload)
-    }
-    showAddUserForm.value = false
-    editingUserId.value = null
-    newUser.value = { nombreEmpleado: '', email: '', role: 'cashier', active: true }
-    await loadUsers()
-    successMessage.value = wasEditing ? 'Usuario actualizado correctamente' : 'Usuario agregado correctamente'
-    setTimeout(() => {
-      successMessage.value = ''
-    }, 3000)
-  } catch (err: any) {
-    errorMessage.value = err.message || 'Error al crear usuario'
-  }
-}
-
-const editUser = (user: any) => {
-  editingUserId.value = Number(user.id)
-  newUser.value = {
-    nombreEmpleado: user.nombreEmpleado || '',
-    email: user.email || '',
-    role: user.role || 'cashier',
-    active: user.active !== false
-  }
-  showAddUserForm.value = true
-}
-
-const deleteUser = async (userId: number) => {
-  try {
-    await api.post(`/employees/${userId}/deactivate`)
-    await loadUsers()
-    successMessage.value = 'Usuario desactivado correctamente'
-    setTimeout(() => {
-      successMessage.value = ''
-    }, 3000)
-  } catch (err: any) {
-    errorMessage.value = err.message || 'Error al desactivar usuario'
+    const health: any = await hardwareAgent.health()
+    const reportedPrinters = Array.isArray(health?.printers)
+      ? health.printers
+      : health?.printer
+        ? [health.printer]
+        : []
+    printers.value = reportedPrinters.map((printer: any, index: number) => ({
+      id: String(printer.id || printer.name || `printer-${index}`),
+      name: String(printer.name || 'Impresora sin nombre'),
+      model: String(printer.model || 'Modelo no reportado'),
+      connected: Boolean(printer.connected ?? printer.active)
+    }))
+    printersSimulated.value = health?.simulated === true
+  } catch {
+    printers.value = []
+    printerError.value = 'No se pudo consultar el agente local. Verifica que esté iniciado en este equipo.'
+  } finally {
+    isLoadingPrinters.value = false
   }
 }
 
@@ -487,10 +401,6 @@ const testPrinter = async () => {
   } finally {
     isTestingPrinter.value = false
   }
-}
-
-const editPrinter = (printerId: number) => {
-  console.log('Editar impresora:', printerId)
 }
 
 const formatBytes = (bytes: number) => {
@@ -555,14 +465,6 @@ const downloadBackup = async (backupId?: number, format: 'json' | 'csv' | 'xlsx'
   }
 }
 
-const scheduleAutoBackup = () => {
-  console.log('Programando respaldo automático')
-  successMessage.value = 'Respaldo automático programado para las 2:00 AM'
-  setTimeout(() => {
-    successMessage.value = ''
-  }, 3000)
-}
-
 const restoreBackup = async (backupId: number) => {
   if (confirm('¿Estás seguro de que deseas restaurar este respaldo? Se perderán datos recientes.')) {
     try {
@@ -576,9 +478,13 @@ const restoreBackup = async (backupId: number) => {
 }
 
 onMounted(async () => {
-  await loadOrganizationSettings()
-  await loadUsers()
-  await loadBackups()
+  await Promise.all([
+    loadOrganizationSettings(),
+    loadUsers(),
+    loadOrganizationSummary(),
+    loadPrinterStatus(),
+    loadBackups()
+  ])
 })
 </script>
 

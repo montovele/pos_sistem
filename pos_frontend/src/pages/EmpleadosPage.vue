@@ -164,17 +164,36 @@
               <Input id="employee-username" v-model="formData.username" placeholder="Ej: juan.perez" type="text" required />
             </div>
             <div class="form-group">
-              <label for="employee-organization">Organización <span>*</span></label>
-              <Input id="employee-organization" v-model.number="formData.organizationId" placeholder="Ej: 1" type="number" min="1" required />
+              <label for="employee-organization">Organización de la sesión <span>*</span></label>
+              <select
+                id="employee-organization"
+                v-model.number="formData.organizationId"
+                class="role-select"
+                required
+                :disabled="!sessionOrganizationId"
+              >
+                <option v-if="!sessionOrganizationId" :value="0" disabled>
+                  No se encontró la organización de la sesión
+                </option>
+                <option v-else :value="sessionOrganizationId">
+                  {{ sessionOrganizationId }} · {{ sessionOrganizationName }}
+                </option>
+              </select>
             </div>
             <div class="form-group">
               <label for="employee-role">Rol <span>*</span></label>
               <select id="employee-role" v-model="formData.rol" required class="role-select">
                 <option value="">Seleccionar rol</option>
-                <option value="admin">Administrador</option>
-                <option value="cajero">Cajero</option>
-                <option value="gerente">Gerente</option>
-                <option value="vendedor">Vendedor</option>
+                <option
+                  v-if="editingEmpleado && !availableRoles.some(role => role.value === formData.rol)"
+                  :value="formData.rol"
+                  disabled
+                >
+                  {{ roleLabel(formData.rol) }} (sin permisos para asignar)
+                </option>
+                <option v-for="role in availableRoles" :key="role.value" :value="role.value">
+                  {{ role.label }}
+                </option>
               </select>
             </div>
             <div class="form-group">
@@ -291,6 +310,36 @@ interface Empleado {
 
 // Stores
 const authStore = useAuthStore()
+const sessionOrganizationId = computed(() => {
+  const id = Number(authStore.currentOrganization?.id ?? authStore.currentUser?.organizationId)
+  return Number.isInteger(id) && id > 0 ? id : null
+})
+const sessionOrganizationName = computed(() => (
+  authStore.currentOrganization?.name
+  || authStore.currentUser?.organizationName
+  || 'Organización activa'
+))
+const availableRoles = computed(() => {
+  const roles = [
+    { value: 'cajero', label: 'Cajero' },
+    { value: 'gerente', label: 'Gerente' },
+    { value: 'vendedor', label: 'Vendedor' }
+  ]
+  if (authStore.user?.role === 'superadmin') {
+    return [{ value: 'admin', label: 'Administrador' }, ...roles]
+  }
+  return roles
+})
+
+const roleLabel = (role: string) => ({
+  admin: 'Administrador',
+  cajero: 'Cajero',
+  cashier: 'Cajero',
+  gerente: 'Gerente',
+  manager: 'Gerente',
+  vendedor: 'Vendedor',
+  superadmin: 'Superadministrador'
+}[role] || role)
 
 // Estado
 const empleados = ref<Empleado[]>([])
@@ -314,7 +363,7 @@ const formData = ref<Empleado>({
   cedula: '',
   email: '',
   telefono: '',
-  organizationId: 1,
+  organizationId: 0,
   rol: '',
   activo: true
 })
@@ -398,7 +447,12 @@ const loadEmpleados = async () => {
       email: employee.email || '',
       telefono: employee.telefono || employee.phone || '',
       organizationId: Number(employee.organizationId || employee.organization_id || 1),
-      rol: employee.rol || (employee.role === 'manager' ? 'gerente' : employee.role === 'admin' ? 'admin' : 'cajero'),
+      rol: employee.rol || ({
+        manager: 'gerente',
+        admin: 'admin',
+        superadmin: 'superadmin',
+        vendedor: 'vendedor'
+      }[employee.role] || 'cajero'),
       activo: employee.activo ?? employee.active ?? true,
       ...employee
       }
@@ -422,7 +476,7 @@ const openModal = (empleado?: Empleado) => {
       cedula: String(empleado.cedula || ''),
       email: empleado.email || '',
       telefono: empleado.telefono || '',
-      organizationId: Number(empleado.organizationId || 1),
+      organizationId: sessionOrganizationId.value || 0,
       rol: empleado.rol || 'cajero',
       activo: empleado.activo ?? true,
       password: ''
@@ -436,7 +490,7 @@ const openModal = (empleado?: Empleado) => {
       cedula: '',
       email: '',
       telefono: '',
-      organizationId: 1,
+      organizationId: sessionOrganizationId.value || 0,
       rol: '',
       activo: true
     }
@@ -454,7 +508,7 @@ const closeModal = () => {
     cedula: '',
     email: '',
     telefono: '',
-      organizationId: 1,
+      organizationId: sessionOrganizationId.value || 0,
     rol: '',
     activo: true
   }
@@ -466,7 +520,12 @@ const handleSubmit = async () => {
     error.value = null
     successMessage.value = null
 
-    if (!formData.value.nombre || !formData.value.username || !formData.value.email || !formData.value.organizationId || !formData.value.rol || (!editingEmpleado.value && !formData.value.password)) {
+    if (!sessionOrganizationId.value || formData.value.organizationId !== sessionOrganizationId.value) {
+      error.value = 'La organización seleccionada no coincide con la organización de tu sesión.'
+      return
+    }
+
+    if (!formData.value.nombre || !formData.value.username || !formData.value.email || !formData.value.rol || (!editingEmpleado.value && !formData.value.password)) {
       error.value = 'Todos los campos obligatorios deben estar completos'
       return
     }
@@ -485,7 +544,7 @@ const handleSubmit = async () => {
       rol: formData.value.rol,
       active: formData.value.activo,
       activo: formData.value.activo,
-      organizationId: formData.value.organizationId
+      organizationId: sessionOrganizationId.value
     }
 
     if (editingEmpleado.value) {
@@ -558,7 +617,8 @@ const handleDelete = async () => {
 }
 
 // Load on mount
-onMounted(() => {
+onMounted(async () => {
+  await authStore.refreshOrganization()
   loadEmpleados()
 })
 </script>

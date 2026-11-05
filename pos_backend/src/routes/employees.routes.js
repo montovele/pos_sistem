@@ -2,15 +2,9 @@ import express from 'express';
 import requireAuth from '../middleware/auth.js';
 import { employeeService } from '../services/employeeService.js';
 import { jsonSuccess } from '../utils/response.js';
+import { requireAdmin, requireAssignableRole } from '../middleware/roles.js';
 
 const router = express.Router();
-
-const requireAdmin = (req, res, next) => {
-  if (!req.user || req.user.role !== 'admin') {
-    return res.status(403).json({ success: false, message: 'No autorizado para gestionar empleados' });
-  }
-  return next();
-};
 
 const getOrgScope = (req) => ({ organizationId: Number(req.user?.organizationId || 1) });
 
@@ -28,7 +22,7 @@ router.get('/:id', requireAuth, async (req, res) => {
   return res.json(jsonSuccess(employee));
 });
 
-router.post('/', requireAuth, requireAdmin, async (req, res) => {
+router.post('/', requireAuth, requireAdmin, requireAssignableRole, async (req, res) => {
   console.log('[EMPLOYEES / POST] creando empleado con payload:', req.body);
   const employee = await employeeService.create(req.body || {}, req.user);
   if (!employee || employee.error) {
@@ -110,10 +104,13 @@ router.post('/:id/reset-password', requireAuth, requireAdmin, async (req, res) =
 router.delete('/:id', requireAuth, requireAdmin, async (req, res) => {
   const id = req.params.id;
   console.log('[EMPLOYEES /:id DELETE] eliminando empleado:', id);
-  const employee = await employeeService.remove(id);
+  const employee = await employeeService.remove(id, req.user);
   if (!employee) {
     console.warn('[EMPLOYEES /:id DELETE] empleado no encontrado:', id);
     return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
+  }
+  if (employee.error) {
+    return res.status(employee.status || 500).json({ success: false, message: employee.error });
   }
 
   console.log('[EMPLOYEES /:id DELETE] empleado eliminado:', employee.id);

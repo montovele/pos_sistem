@@ -16,12 +16,14 @@
           v-if="!cajaAbierta"
           label="Abrir caja"
           variant="success"
+          :disabled="subscriptionRequired"
           @click="openCaja"
         />
         <Button
           v-else
           label="Cerrar caja"
           variant="danger"
+          :disabled="subscriptionRequired"
           @click="closeCaja"
         />
       </div>
@@ -41,6 +43,19 @@
       <p v-else class="next-step">Turno de {{ cajeroActual || 'cajero actual' }} · Apertura {{ horaApertura || '-' }}</p>
     </div>
 
+    <Alert
+      v-if="subscriptionRequired"
+      type="warning"
+      message="La suscripción de esta organización está vencida o aún no se ha activado. Las operaciones de caja están pausadas."
+      class="mt-4"
+    />
+    <router-link
+      v-if="subscriptionRequired"
+      to="/suscripcion"
+      class="subscription-link"
+    >
+      Consultar el plan y el estado de la suscripción
+    </router-link>
     <Alert
       v-if="error"
       type="error"
@@ -174,7 +189,7 @@
           <Button
             label="Guardar Arqueo"
             variant="primary"
-            :disabled="isProcessing || efectivoContado === null"
+            :disabled="subscriptionRequired || isProcessing || efectivoContado === null"
             @click="saveArqueo"
           />
           <Button
@@ -249,7 +264,7 @@
         <Button
           label="Abrir Caja"
           variant="success"
-          :disabled="baseCajaInput <= 0"
+          :disabled="subscriptionRequired || baseCajaInput <= 0"
           @click="handleOpenCaja"
         />
       </template>
@@ -279,7 +294,7 @@
         <Button
           label="Cerrar Caja"
           variant="danger"
-          :disabled="isProcessing || efectivoContado === null"
+          :disabled="subscriptionRequired || isProcessing || efectivoContado === null"
           @click="handleCloseCaja"
         />
       </template>
@@ -339,6 +354,7 @@ const historialCajas = ref<CajaHistory[]>([])
 const error = ref<string | null>(null)
 const successMessage = ref<string | null>(null)
 const salesNotice = ref<string | null>(null)
+const subscriptionRequired = ref(false)
 const isLoadingTransactions = ref(false)
 const isLoadingHistorial = ref(false)
 const isProcessing = ref(false)
@@ -350,6 +366,27 @@ const cashSessionServerId = ref<string | null>(null)
 const isBackendUnavailable = (err: any) =>
   !navigator.onLine || (Number(err?.status) >= 500 && Number(err?.status) < 600) ||
   /network|offline|failed to fetch|fetch|timeout|ERR_NETWORK|ECONNABORTED|status code 5\d\d/i.test(String(err?.message || ''))
+const isSubscriptionRequired = (err: any) =>
+  Number(err?.status) === 402 || err?.code === 'SUBSCRIPTION_REQUIRED'
+
+const markSubscriptionRequired = () => {
+  subscriptionRequired.value = true
+  error.value = null
+  salesNotice.value = null
+  transacciones.value = []
+  historialCajas.value = []
+  backendTotalVentas.value = null
+  backendTotalEfectivo.value = null
+  backendTotalEsperado.value = null
+  backendTotalTransacciones.value = null
+  backendDiferencia.value = null
+  metodoPago.value = {
+    efectivo: { count: 0, total: 0 },
+    tarjeta: { count: 0, total: 0 },
+    cheque: { count: 0, total: 0 },
+    transferencia: { count: 0, total: 0 }
+  }
+}
 
 // Modales
 const showOpenModal = ref(false)
@@ -484,6 +521,7 @@ const loadPersistedCajaState = () => {
 }
 
 const loadCajaStatus = async () => {
+  if (subscriptionRequired.value) return
   try {
     const response = await api.get('/caja/status')
     if (response.data.success) {
@@ -504,6 +542,10 @@ const loadCajaStatus = async () => {
       saveCajaState()
     }
   } catch (err: any) {
+    if (isSubscriptionRequired(err)) {
+      markSubscriptionRequired()
+      return
+    }
     console.error('Error loading caja status:', err)
     loadPersistedCajaState()
     if (isBackendUnavailable(err)) {
@@ -516,6 +558,7 @@ const loadCajaStatus = async () => {
 }
 
 const loadTransacciones = async () => {
+  if (subscriptionRequired.value) return
   try {
     isLoadingTransactions.value = true
     salesNotice.value = null
@@ -553,6 +596,10 @@ const loadTransacciones = async () => {
       persistOfflineTransactions()
     }
   } catch (err: any) {
+    if (isSubscriptionRequired(err)) {
+      markSubscriptionRequired()
+      return
+    }
     console.error('Error loading transacciones:', err)
     if (isBackendUnavailable(err)) {
       transacciones.value = loadOfflineTransactions()
@@ -569,6 +616,7 @@ const loadTransacciones = async () => {
 }
 
 const loadHistorial = async () => {
+  if (subscriptionRequired.value) return
   try {
     isLoadingHistorial.value = true
     const response = await api.get('/caja/history')
@@ -577,6 +625,10 @@ const loadHistorial = async () => {
       persistOfflineHistory()
     }
   } catch (err: any) {
+    if (isSubscriptionRequired(err)) {
+      markSubscriptionRequired()
+      return
+    }
     console.error('Error loading historial:', err)
     const offline = !navigator.onLine || /network|offline|failed to fetch|fetch|timeout|ERR_NETWORK|ECONNABORTED/i.test(String(err?.message || ''))
     if (offline) {
@@ -667,6 +719,10 @@ const handleOpenCaja = async () => {
       error.value = response.data.message || 'Error al abrir caja'
     }
   } catch (err: any) {
+    if (isSubscriptionRequired(err)) {
+      markSubscriptionRequired()
+      return
+    }
     if (isBackendUnavailable(err)) {
       await openCajaLocally()
       return
@@ -708,6 +764,10 @@ const handleCloseCaja = async () => {
       error.value = response.data.message || 'Error al cerrar caja'
     }
   } catch (err: any) {
+    if (isSubscriptionRequired(err)) {
+      markSubscriptionRequired()
+      return
+    }
     const offline = !navigator.onLine || /network|offline|failed to fetch|fetch|timeout|ERR_NETWORK|ECONNABORTED/i.test(String(err?.message || ''))
     if (offline) {
       cajaAbierta.value = false
@@ -743,6 +803,10 @@ const saveArqueo = async () => {
       error.value = response.data.message || 'Error al guardar arqueo'
     }
   } catch (err: any) {
+    if (isSubscriptionRequired(err)) {
+      markSubscriptionRequired()
+      return
+    }
     const offline = !navigator.onLine || /network|offline|failed to fetch|fetch|timeout|ERR_NETWORK|ECONNABORTED/i.test(String(err?.message || ''))
     if (offline) {
       backendDiferencia.value = efectivoContado.value !== null ? efectivoContado.value - totalEsperado.value : 0
@@ -1377,6 +1441,14 @@ onMounted(() => {
 
 .mt-4 {
   margin-top: 0 !important;
+}
+
+.subscription-link {
+  display: inline-flex;
+  margin: 0.75rem 0 0;
+  color: #155e75;
+  font-weight: 700;
+  text-decoration: underline;
 }
 
 /* Visual hierarchy for the cashier's daily workflow. */

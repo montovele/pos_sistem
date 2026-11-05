@@ -240,7 +240,6 @@ const stockLabel = (product: Product) => {
 
 // Métodos
 const reloadCatalog = async () => {
-  searchQuery.value = ''
   selectedCategory.value = 'all'
   error.value = ''
   if (debounceTimer.value) {
@@ -266,12 +265,9 @@ watch(
         }
 
         const response = await productStore.searchProducts(query.trim(), 1)
-        if (!response.data.length) {
-          await reloadCatalog()
-        }
+        if (!response.data.length) selectedCategory.value = 'all'
       } catch (err) {
         error.value = err instanceof Error ? err.message : 'Error en búsqueda'
-        await reloadCatalog()
       }
     }, 400)
   }
@@ -284,7 +280,6 @@ const handleSearch = (event: Event) => {
 
 const handleClearSearch = () => {
   searchQuery.value = ''
-  void reloadCatalog()
 }
 
 const selectCategory = (category: string) => {

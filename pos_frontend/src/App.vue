@@ -1,7 +1,7 @@
 <template>
   <div id="app" class="app-container">
-    <nav class="navbar" v-if="isAuthenticated && route.path !== '/pos'" aria-label="Navegación principal">
-      <router-link to="/" class="brand-block" aria-label="Ir al inicio">
+    <nav class="navbar" v-if="isAuthenticated && !isPublicPage && route.path !== '/pos'" aria-label="Navegación principal">
+      <router-link to="/inicio" class="brand-block" aria-label="Ir al inicio">
         <span class="brand-mark">N</span>
         <span class="brand-copy">
           <strong>LEMARQUET</strong>
@@ -33,7 +33,7 @@
       </div>
     </nav>
 
-    <div class="connection-status" :class="isOnline ? 'is-online' : 'is-offline'" role="status" aria-live="polite">
+    <div v-if="isAuthenticated && !isPublicPage" class="connection-status" :class="isOnline ? 'is-online' : 'is-offline'" role="status" aria-live="polite">
       <span class="connection-indicator" aria-hidden="true"></span>
       <transition name="connection-label" mode="out-in">
         <strong :key="isOnline ? 'online' : 'offline'">{{ isOnline ? 'Sistema en línea' : 'Modo sin conexión' }}</strong>
@@ -51,42 +51,85 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useAuthStore } from '@/stores/authStore'
 import { useRouter, useRoute } from 'vue-router'
+import { api } from '@/services/api'
 
 const authStore = useAuthStore()
 const router = useRouter()
 const route = useRoute()
 const isOnline = ref(typeof navigator === 'undefined' || navigator.onLine)
+let connectionCheckTimer: ReturnType<typeof setInterval> | null = null
+let connectionCheckInProgress = false
 
-const updateConnectionStatus = () => {
-  isOnline.value = navigator.onLine
+const checkConnection = async () => {
+  if (!navigator.onLine) {
+    isOnline.value = false
+    return
+  }
+
+  if (connectionCheckInProgress) return
+  connectionCheckInProgress = true
+
+  try {
+    await api.get('/health', { timeout: 5000 })
+    isOnline.value = true
+  } catch {
+    isOnline.value = false
+  } finally {
+    connectionCheckInProgress = false
+  }
+}
+
+const handleOffline = () => {
+  isOnline.value = false
+}
+
+const handleVisibilityChange = () => {
+  if (document.visibilityState === 'visible') {
+    void checkConnection()
+  }
 }
 
 const isAuthenticated = computed(() => authStore.isAuthenticated)
-const isAdmin = computed(() => authStore.currentUser?.role === 'admin')
-const roleLabel = computed(() => isAdmin.value ? 'Administrador' : 'Cajero')
+const isPublicPage = computed(() => ['/', '/planes', '/activar-cuenta'].includes(route.path))
+const isAdmin = computed(() => ['admin', 'superadmin'].includes(authStore.currentUser?.role || ''))
+const roleLabel = computed(() => authStore.currentUser?.role === 'superadmin'
+  ? 'Superadministrador'
+  : isAdmin.value ? 'Administrador' : 'Cajero')
 const organizationName = computed(() => authStore.currentOrganization?.name || authStore.currentUser?.organizationName || 'Empresa no identificada')
 
 const menuItems = [
-  { label: 'Inicio', to: '/' },
+  { label: 'Inicio', to: '/inicio' },
   { label: 'POS', to: '/pos' },
   { label: 'Caja', to: '/caja' },
   { label: 'Facturas', to: '/facturas', adminOnly: true },
   { label: 'Inventario', to: '/inventario', adminOnly: true },
   { label: 'Reportes', to: '/reports', adminOnly: true },
   { label: 'Empleados', to: '/empleados', adminOnly: true },
-  { label: 'Configuración', to: '/settings', adminOnly: true }
+  { label: 'Configuración', to: '/settings', adminOnly: true },
+  { label: 'Suscripción', to: '/suscripcion' },
+  { label: 'Descargas', to: '/descargas' }
 ]
 
 const visibleMenuItems = computed(() => menuItems.filter(item => !item.adminOnly || isAdmin.value))
 
 onMounted(() => {
-  window.addEventListener('online', updateConnectionStatus)
-  window.addEventListener('offline', updateConnectionStatus)
+  window.addEventListener('online', checkConnection)
+  window.addEventListener('offline', handleOffline)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  void checkConnection()
+  connectionCheckTimer = setInterval(() => {
+    void checkConnection()
+  }, 15000)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('online', updateConnectionStatus)
-  window.removeEventListener('offline', updateConnectionStatus)
+  window.removeEventListener('online', checkConnection)
+  window.removeEventListener('offline', handleOffline)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  if (connectionCheckTimer) {
+    clearInterval(connectionCheckTimer)
+    connectionCheckTimer = null
+  }
 })
 
 const logout = async () => {
@@ -134,25 +177,30 @@ const logout = async () => {
 }
 
 .connection-status {
-  position: relative;
-  z-index: 2;
+  position: fixed;
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  z-index: 20;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
   flex-wrap: wrap;
   gap: 0.45rem;
-  min-height: 2.35rem;
-  padding: 0.4rem 1rem;
+  max-width: min(22rem, calc(100vw - 2rem));
+  padding: 0.65rem 0.9rem;
   border: 1px solid transparent;
-  border-radius: 0;
-  font-size: 0.7rem;
-  transition: color 0.25s ease, background-color 0.25s ease, border-color 0.25s ease;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  box-shadow: 0 8px 24px rgba(23, 32, 51, 0.16);
+  pointer-events: none;
+  transition: color 0.25s ease, background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
 .connection-status.is-online {
   color: #17603a;
   background: #eaf7ef;
   border-color: #b9e1c7;
+  box-shadow: 0 6px 20px rgba(23, 96, 58, 0.12);
 }
 
 .connection-status.is-offline {
@@ -160,6 +208,7 @@ const logout = async () => {
   background: #fff4d6;
   border-color: #e7bd53;
   justify-content: flex-start;
+  border-radius: 0.85rem;
 }
 
 .connection-status strong {
@@ -362,9 +411,13 @@ const logout = async () => {
 
 @media (max-width: 760px) {
   .connection-status {
-    justify-content: flex-start;
-    padding-right: 0.7rem;
-    padding-left: 0.7rem;
+    right: max(0.75rem, env(safe-area-inset-right));
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    max-width: min(20rem, calc(100vw - 1.5rem));
+  }
+
+  .connection-detail {
+    flex-basis: 100%;
   }
 
   .navbar {

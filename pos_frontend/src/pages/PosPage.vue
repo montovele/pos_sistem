@@ -35,6 +35,7 @@
     <div class="pos-container">
       <div class="pos-main-column">
         <div class="quick-tools">
+          
           <section class="scanner-panel" aria-label="Lector de código de barras">
             <div class="scanner-copy"><span class="scanner-icon">▥</span><strong>Escanear producto</strong></div>
             <div class="scanner-input-wrap">
@@ -341,10 +342,22 @@ const clearScanner = () => {
   barcode.value = ''
   scannerMessage.value = ''
   scannerError.value = false
+  void productStore.loadProducts(1)
   nextTick(() => scannerInput.value?.focus())
 }
 
 const scheduleBarcodeScan = () => {
+  if (!barcode.value.trim()) {
+    if (scannerTimer.value) {
+      clearTimeout(scannerTimer.value)
+      scannerTimer.value = null
+    }
+    scannerMessage.value = ''
+    scannerError.value = false
+    void productStore.loadProducts(1)
+    return
+  }
+
   if (document.activeElement === weightInput.value) {
     if (scannerTimer.value) {
       clearTimeout(scannerTimer.value)
@@ -715,10 +728,12 @@ onBeforeUnmount(() => {
 
 .scanner-panel {
   display: grid;
-  grid-template-columns: auto minmax(220px, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.45rem 0.6rem;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.5rem 0.6rem;
   border: 1px solid #d7e5f0;
   border-radius: 8px;
   background: white;
@@ -726,14 +741,22 @@ onBeforeUnmount(() => {
 
 .scanner-copy,
 .scanner-copy > div { display: flex; align-items: center; gap: 0.45rem; }
+.scanner-copy { min-width: 0; }
 .scanner-copy strong { color: #173758; font-size: 0.72rem; white-space: nowrap; }
 .scanner-icon { color: #1677d2; font-size: 1rem; font-weight: 900; }
-.scanner-input-wrap { position: relative; display: flex; gap: 0.35rem; }
+.scanner-input-wrap {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
 .scanner-input { width: 100%; min-width: 0; padding: 0.55rem 2.2rem 0.55rem 0.65rem; border: 1px solid #d7e3ef; border-radius: 6px; background: #f8fbfe; font-size: 0.76rem; min-height: 34px; }
 .scanner-input:focus { outline: 2px solid rgba(22, 119, 210, 0.18); border-color: #1677d2; }
-.clear-scanner { position: absolute; right: 5.2rem; top: 50%; transform: translateY(-50%); border: 0; background: transparent; color: #6c7a7a; cursor: pointer; font-size: 1.1rem; }
-.scan-button { border: 0; border-radius: 6px; padding: 0 0.75rem; background: #1677d2; color: white; font-size: 0.7rem; font-weight: 800; cursor: pointer; min-height: 34px; }
-.scanner-message { margin: 0; font-size: 0.72rem; font-weight: 700; }
+.clear-scanner { position: absolute; right: 4.35rem; top: 50%; transform: translateY(-50%); border: 0; background: transparent; color: #6c7a7a; cursor: pointer; font-size: 1.1rem; }
+.scan-button { min-width: 4rem; border: 0; border-radius: 6px; padding: 0 0.55rem; background: #1677d2; color: white; font-size: 0.7rem; font-weight: 800; cursor: pointer; min-height: 34px; }
+.scanner-message { margin: 0; font-size: 0.72rem; font-weight: 700; overflow-wrap: anywhere; }
 .scanner-message.success { color: #18794e; }
 .scanner-message.error { color: #a34735; }
 
@@ -747,6 +770,7 @@ onBeforeUnmount(() => {
 .pos-container {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   display: grid;
   grid-template-columns: minmax(0, 1.7fr) minmax(320px, 420px);
   gap: 0.9rem;
@@ -757,6 +781,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   gap: 0.7rem;
 }
 
@@ -765,6 +790,7 @@ onBeforeUnmount(() => {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.55rem;
   align-items: stretch;
+  min-width: 0;
 }
 
 .pos-shortcuts {
@@ -780,11 +806,12 @@ onBeforeUnmount(() => {
 
 .scale-panel {
   display: grid;
-  grid-template-columns: minmax(170px, 220px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 0.42rem;
   max-width: 1400px;
   width: 100%;
+  min-width: 0;
   margin: 0;
   padding: 0.42rem 0.6rem;
   border: 1px solid #cfe1ee;
@@ -804,6 +831,8 @@ onBeforeUnmount(() => {
   gap: 0.42rem;
   min-width: 0;
 }
+
+.scale-heading > div { min-width: 0; }
 
 .scale-icon {
   color: #0b7a75;
@@ -831,7 +860,7 @@ onBeforeUnmount(() => {
 .scale-input-wrap {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: stretch;
   justify-content: flex-start;
   gap: 0.32rem;
   min-width: 0;
@@ -843,11 +872,11 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: flex-start;
   min-width: 0;
-  flex: 0 0 auto;
+  flex: 1 1 8rem;
 }
 
 .weight-input-shell input {
-  width: 6.8rem;
+  width: 100%;
   min-width: 0;
   padding: 0.42rem 0.5rem;
   border: 1px solid #c8dbea;
@@ -881,7 +910,8 @@ onBeforeUnmount(() => {
 }
 
 .scale-conversion {
-  min-width: 4rem;
+  min-width: 0;
+  align-self: center;
   color: #0b7a75;
   font-size: 0.68rem;
   font-weight: 800;
@@ -900,9 +930,10 @@ onBeforeUnmount(() => {
   cursor: pointer;
   font-size: 0.68rem;
   font-weight: 700;
-  white-space: nowrap;
+  white-space: normal;
   min-height: 34px;
-  flex: 0 0 auto;
+  min-width: 0;
+  flex: 1 1 8rem;
 }
 
 .scale-action.secondary {
@@ -917,10 +948,11 @@ onBeforeUnmount(() => {
 }
 
 .scale-guidance {
-  grid-column: 1 / -1;
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 0.42rem 0.55rem;
   border-radius: 8px;
   background: linear-gradient(90deg, rgba(11, 122, 117, 0.08), rgba(22, 119, 210, 0.08));
@@ -937,6 +969,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   width: 1.2rem;
   height: 1.2rem;
+  flex: 0 0 auto;
   border-radius: 50%;
   background: rgba(11, 122, 117, 0.1);
   color: #0b7a75;
@@ -955,11 +988,11 @@ onBeforeUnmount(() => {
 }
 
 .scale-message {
-  grid-column: 1 / -1;
   margin: 0;
   color: #18794e;
   font-size: 0.64rem;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .scale-message.error {
@@ -1436,10 +1469,11 @@ onBeforeUnmount(() => {
 
 /* Responsive */
 @media (max-width: 900px) {
-  .scanner-panel { grid-template-columns: 1fr 1fr; }
-  .scanner-message { grid-column: 1 / -1; }
   .pos-container {
     grid-template-columns: 1fr;
+  }
+  .quick-tools {
+    grid-template-columns: minmax(0, 1fr);
   }
   .cart-section {
     position: sticky;
@@ -1449,20 +1483,13 @@ onBeforeUnmount(() => {
     border-top: 2px solid #e0e0e0;
     max-height: 50vh;
   }
-
-  .scale-panel {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 700px) {
   .pos-page { overflow: auto; }
   .pos-header { align-items: flex-start; flex-direction: column; }
   .header-status { width: 100%; justify-content: space-between; }
-  .scanner-panel { grid-template-columns: 1fr; }
-  .scanner-input-wrap { min-width: 0; }
   .scale-input-wrap { flex-wrap: wrap; }
-  .scale-input-wrap input { flex: 1; width: auto; }
   .hardware-bar { flex-wrap: wrap; gap: 0.6rem; }
   .printer-name { margin-right: 0; }
   .pos-container { flex: none; }
@@ -1484,4 +1511,3 @@ onBeforeUnmount(() => {
   }
 }
 </style>
-

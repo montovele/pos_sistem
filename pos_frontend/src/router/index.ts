@@ -3,6 +3,9 @@ import { useAuthStore } from '@/stores/authStore'
 
 // Pages
 const LoginPage = () => import('@/pages/LoginPage.vue')
+const LandingPage = () => import('@/pages/LandingPage.vue')
+const PlansPage = () => import('@/pages/PlansPage.vue')
+const ActivateAccountPage = () => import('@/pages/ActivateAccountPage.vue')
 const HomePage = () => import('@/pages/HomePage.vue')
 const PosPage = () => import('@/pages/PosPage.vue')
 const ReportsPage = () => import('@/pages/ReportsPage.vue')
@@ -12,9 +15,29 @@ const SettingsPage = () => import('@/pages/SettingsPage.vue')
 const FacturasPage = () => import('@/pages/FacturasPage.vue')
 const FacturaDetallePage = () => import('@/pages/FacturaDetallePage.vue')
 const InventoryPage = () => import('@/pages/InventoryPage.vue')
+const SubscriptionPage = () => import('@/pages/SubscriptionPage.vue')
+const DownloadsPage = () => import('@/pages/DownloadsPage.vue')
 const NotFoundPage = () => import('@/pages/NotFoundPage.vue')
 
 const routes: RouteRecordRaw[] = [
+  {
+    path: '/',
+    name: 'Landing',
+    component: LandingPage,
+    meta: { requiresAuth: false }
+  },
+  {
+    path: '/planes',
+    name: 'Plans',
+    component: PlansPage,
+    meta: { requiresAuth: false }
+  },
+  {
+    path: '/activar-cuenta',
+    name: 'ActivateAccount',
+    component: ActivateAccountPage,
+    meta: { requiresAuth: false }
+  },
   {
     path: '/login',
     name: 'Login',
@@ -22,7 +45,7 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: false }
   },
   {
-    path: '/',
+    path: '/inicio',
     name: 'Home',
     component: HomePage,
     meta: { requiresAuth: true }
@@ -94,6 +117,18 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, requiresAdmin: true }
   },
   {
+    path: '/suscripcion',
+    name: 'Subscription',
+    component: SubscriptionPage,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/descargas',
+    name: 'Downloads',
+    component: DownloadsPage,
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: NotFoundPage
@@ -123,7 +158,7 @@ router.beforeEach(async (to, from) => {
         }
       }
     }
-    if (to.meta.requiresAdmin && authStore.currentUser?.role !== 'admin') {
+    if (to.meta.requiresAdmin && !['admin', 'superadmin'].includes(authStore.currentUser?.role || '')) {
       return { name: 'Home' }
     }
   } else if (to.name === 'Login' && authStore.isAuthenticated) {

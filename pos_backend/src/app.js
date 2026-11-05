@@ -12,6 +12,7 @@ import facturasRoutes from './routes/facturas.routes.js';
 import backupsRoutes from './routes/backups.routes.js';
 import { inventoryRoutes } from '../inventario/module/inventory.routes.js';
 import { initializeDatabase, testMySqlConnection } from './config/database.js';
+import subscriptionRoutes, { handlePosSubscriptionWebhook } from './routes/subscription.routes.js';
 
 dotenv.config();
 
@@ -29,9 +30,10 @@ app.use(cors({
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key']
 }));
 
+app.post('/api/suscripciones/webhook', express.raw({ type: 'application/json' }), handlePosSubscriptionWebhook);
 app.use(express.json());
 app.options('*', (_req, res) => res.sendStatus(204));
 
@@ -45,6 +47,7 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
+app.use('/api/suscripciones', subscriptionRoutes);
 app.use('/api/products', productsRoutes);
 app.use('/api/organization', organizationRoutes);
 app.use('/api/employees', employeesRoutes);

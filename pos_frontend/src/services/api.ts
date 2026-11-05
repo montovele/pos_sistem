@@ -41,7 +41,7 @@ api.interceptors.response.use(
     const message = error?.response?.data?.message || error?.message || 'Error al conectar con el servidor'
     const normalizedError = new Error(message) as Error & { status?: number; code?: string }
     normalizedError.status = error?.response?.status
-    normalizedError.code = error?.code
+    normalizedError.code = error?.response?.data?.code || error?.code
     return Promise.reject(normalizedError)
   }
 )
