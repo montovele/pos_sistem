@@ -34,7 +34,7 @@ app.use(cors({
 }));
 
 app.post('/api/suscripciones/webhook', express.raw({ type: 'application/json' }), handlePosSubscriptionWebhook);
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.options('*', (_req, res) => res.sendStatus(204));
 
 app.get('/api/health', (_req, res) => {

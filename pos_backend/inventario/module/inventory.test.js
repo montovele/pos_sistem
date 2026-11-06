@@ -130,6 +130,26 @@ test('acepta unidades de medida ampliadas y normaliza alias', () => {
   assert.match(rows[6].errors[0], /Unidad no soportada/);
 });
 
+test('permite importar hasta 1000 productos CSV y rechaza el siguiente', () => {
+  const headers = 'sku,nombre,unidad,stock';
+  const products = Array.from({ length: 1000 }, (_, index) => (
+    `SKU-${index + 1},Producto ${index + 1},PAQUETE,1`
+  ));
+  const rows = inventoryImportEngine.parseCsv([headers, ...products].join('\n'));
+
+  assert.equal(rows.length, 1000);
+  assert.equal(rows.every((row) => row.valid && row.unit === 'PAQUETE'), true);
+
+  assert.throws(
+    () => inventoryImportEngine.parseCsv([
+      headers,
+      ...products,
+      'SKU-1001,Producto 1001,PAQUETE,1'
+    ].join('\n')),
+    /máximo de 1000 productos/
+  );
+});
+
 test('cashier no puede crear inventario', async () => {
   const app = express();
   app.use(express.json());

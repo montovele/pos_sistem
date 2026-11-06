@@ -69,6 +69,8 @@ inventario/
 - Los valores numéricos deben normalizarse antes de persistirse.
 - Las filas inválidas se marcan y no bloquean el proceso total.
 - La importación debe poder ejecutarse en modo dry-run antes de guardar.
+- CSV, JSON y XLSX aceptan hasta 1.000 productos por importación; los archivos pueden tener hasta 10 MB.
+- Las unidades detalladas se conservan en `inventario_items`; el catálogo POS recibe `KG` para productos por peso y `PZA` para las demás unidades, conforme al esquema de venta existente.
 
 ## Fase siguiente recomendada
 - Añadir filtros por rango de fechas a los reportes administrativos.

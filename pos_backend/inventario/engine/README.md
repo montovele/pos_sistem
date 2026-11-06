@@ -76,7 +76,7 @@ activo -> active
 - El engine vive separado del módulo HTTP en `inventario/engine`.
 - El parsing CSV soporta valores entrecomillados y UTF-8.
 - El engine expone importación CSV, JSON y XLSX sin depender de Express, MySQL o el servicio de inventario.
-- Valida extensiones, MIME, tamaño máximo de 10 MB, máximo de 10.000 filas y valores negativos.
+- Valida extensiones, MIME, tamaño máximo de 10 MB, máximo de 1.000 productos por archivo y valores negativos.
 - Conserva la fila original en el resultado para permitir auditoría JSON sin acoplarse a MySQL.
 
 ## Siguientes pasos

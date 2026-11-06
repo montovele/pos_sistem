@@ -477,17 +477,18 @@ export const inventoryRepository = {
             [tenantId, row.sku, row.sku]
           );
           let productId = productRows[0] ? Number(productRows[0].id) : null;
+          const productUnit = row.unit === 'KG' ? 'KG' : 'PZA';
 
           if (productId) {
             await connection.execute(
               'UPDATE productos SET nombre_prod = ?, price = ?, stock = ?, unit = ?, sale_by_weight = ? WHERE id = ? AND org_id = ?',
-              [row.name, row.price, row.stock, row.unit, row.unit === 'KG' ? 1 : 0, productId, tenantId]
+              [row.name, row.price, row.stock, productUnit, productUnit === 'KG' ? 1 : 0, productId, tenantId]
             );
           } else {
             const [productResult] = await connection.execute(
               `INSERT INTO productos (org_id, codigo_prod, nombre_prod, price, stock, unit, sale_by_weight)
                VALUES (?, ?, ?, ?, ?, ?, ?)`,
-              [tenantId, row.sku, row.name, row.price, row.stock, row.unit, row.unit === 'KG' ? 1 : 0]
+              [tenantId, row.sku, row.name, row.price, row.stock, productUnit, productUnit === 'KG' ? 1 : 0]
             );
             productId = Number(productResult.insertId);
           }

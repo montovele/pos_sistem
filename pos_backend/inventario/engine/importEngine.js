@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
-const MAX_ROWS = 10000;
+const MAX_ROWS = 1000;
 
 const normalizeHeader = (value = '') => String(value || '')
   .trim()
@@ -215,6 +215,11 @@ const parseCsvText = (csvText = '') => {
 
   if (records.length < 2) {
     return [];
+  }
+
+  const totalRows = records.length - 1;
+  if (totalRows > MAX_ROWS) {
+    throw new Error(`El archivo supera el máximo de ${MAX_ROWS} productos`);
   }
 
   const headers = records[0];
