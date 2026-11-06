@@ -320,6 +320,9 @@ onMounted(async () => {
   if (route.query.checkout === 'success') {
     checkoutState.value = 'success'
     await checkCheckoutStatus()
+    if (paymentState.value !== 'account_ready') {
+      await reconcileCheckout()
+    }
     checkoutStatusTimer = setInterval(() => {
       if (paymentState.value === 'account_ready') return
       void checkCheckoutStatus()

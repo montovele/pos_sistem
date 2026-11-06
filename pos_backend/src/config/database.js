@@ -84,7 +84,7 @@ const ensureLegacyCompatibilitySchema = async (connection) => {
   await connection.execute(`
     CREATE TABLE IF NOT EXISTS productos (
       id INT PRIMARY KEY AUTO_INCREMENT,
-      codigo_prod VARCHAR(50) NOT NULL UNIQUE,
+      codigo_prod VARCHAR(50) NOT NULL,
       codigo_altern VARCHAR(50) DEFAULT NULL,
       nombre_prod VARCHAR(150) NOT NULL,
       price DECIMAL(10,2) NOT NULL DEFAULT 0,
@@ -95,7 +95,8 @@ const ensureLegacyCompatibilitySchema = async (connection) => {
       id_category INT NOT NULL DEFAULT 1,
       description TEXT DEFAULT NULL,
       image VARCHAR(255) DEFAULT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_product_org_code (org_id, codigo_prod)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 

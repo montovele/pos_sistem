@@ -219,6 +219,26 @@ test('el modo demo separa inventarios, búsquedas, actualizaciones y movimientos
   assert.equal((await inventoryService.listMovements({ organizationId: 2 })).total, 1);
 });
 
+test('permite importar el mismo SKU en organizaciones distintas', async () => {
+  global.mysqlAvailable = false;
+  const sku = 'SKU-SHARED-ORG-TEST';
+  const [organizationOne] = (await inventoryService.importRows(
+    [{ sku, name: 'Producto org 1' }],
+    { dryRun: false, organizationId: 1 }
+  )).imported;
+  const [organizationTwo] = (await inventoryService.importRows(
+    [{ sku, name: 'Producto org 2' }],
+    { dryRun: false, organizationId: 2 }
+  )).imported;
+
+  assert.equal(organizationOne.sku, sku);
+  assert.equal(organizationTwo.sku, sku);
+  assert.equal(organizationOne.organizationId, 1);
+  assert.equal(organizationTwo.organizationId, 2);
+  assert.equal((await inventoryService.findBySku(sku, 'PRINCIPAL', 1)).name, 'Producto org 1');
+  assert.equal((await inventoryService.findBySku(sku, 'PRINCIPAL', 2)).name, 'Producto org 2');
+});
+
 test('rechaza productId de otra organización en el resolvedor de inventario', async () => {
   const scopedConnection = {
     async execute(_query, params) {
