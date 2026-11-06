@@ -266,14 +266,24 @@ export function createGuestSignupService({
           [signup.nombre_org, signup.email, signup.telefono]
         );
         const organizationId = Number(organizationResult.insertId);
-        const username = `admin-${randomBytes(8).toString('hex')}`;
         const password = randomBytes(32).toString('base64url');
-        const [userResult] = await connection.execute(
-          `INSERT INTO usuarios
-             (username, password, nombre, apellido, email, numero_empleado, organization_id, role, activo)
-           VALUES (?, ?, ?, ?, ?, 1, ?, 'admin', 1)`,
-          [username, passwordHasher(password), signup.nombre, signup.apellido, signup.email, organizationId]
-        );
+        let userResult;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const username = `admin-${organizationId}-${randomBytes(8).toString('hex')}`;
+          try {
+            [userResult] = await connection.execute(
+              `INSERT INTO usuarios
+                 (username, password, nombre, apellido, email, numero_empleado, organization_id, role, activo)
+               VALUES (?, ?, ?, ?, ?, 1, ?, 'admin', 1)`,
+              [username, passwordHasher(password), signup.nombre, signup.apellido, signup.email, organizationId]
+            );
+            break;
+          } catch (error) {
+            if (error.code !== 'ER_DUP_ENTRY' || !String(error.message).includes('username') || attempt === 2) {
+              throw error;
+            }
+          }
+        }
         const userId = Number(userResult.insertId);
 
         await connection.execute(

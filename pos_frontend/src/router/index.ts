@@ -18,6 +18,7 @@ const FacturaDetallePage = () => import('@/pages/FacturaDetallePage.vue')
 const InventoryPage = () => import('@/pages/InventoryPage.vue')
 const SubscriptionPage = () => import('@/pages/SubscriptionPage.vue')
 const DownloadsPage = () => import('@/pages/DownloadsPage.vue')
+const CustomerSupportPage = () => import('@/pages/CustomerSupportPage.vue')
 const NotFoundPage = () => import('@/pages/NotFoundPage.vue')
 
 const routes: RouteRecordRaw[] = [
@@ -133,6 +134,12 @@ const routes: RouteRecordRaw[] = [
     path: '/descargas',
     name: 'Downloads',
     component: DownloadsPage,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/atencion-clientes',
+    name: 'CustomerSupport',
+    component: CustomerSupportPage,
     meta: { requiresAuth: true }
   },
   {

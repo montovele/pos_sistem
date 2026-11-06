@@ -54,6 +54,22 @@ const getDemoEmployees = (filters = {}) => {
   };
 };
 
+export async function findAvailableUsername(pool, requestedUsername, organizationId, startIndex = 0) {
+  const baseUsername = String(requestedUsername || '').trim();
+  for (let suffixIndex = startIndex; suffixIndex < startIndex + 100; suffixIndex += 1) {
+    const suffix = suffixIndex === 0
+      ? ''
+      : `-${organizationId}${suffixIndex > 1 ? `-${suffixIndex - 1}` : ''}`;
+    const username = `${baseUsername.slice(0, 50 - suffix.length)}${suffix}`;
+    const [rows] = await pool.execute(
+      'SELECT id FROM usuarios WHERE username = ? LIMIT 1',
+      [username]
+    );
+    if (!rows.length) return { username, suffixIndex };
+  }
+  throw new Error('No fue posible asignar un nombre de usuario único.');
+}
+
 export const employeeService = {
   async list(filters = {}) {
     if (!global.mysqlAvailable) {
@@ -152,21 +168,37 @@ export const employeeService = {
     }
 
     try {
-      const username = String(payload.username || payload.userName || `emp-${Date.now()}`).trim();
+      const requestedUsername = String(payload.username || payload.userName || `emp-${Date.now()}`).trim();
       const nombre = String(payload.firstName || payload.nombre || 'Empleado');
       const apellido = String(payload.lastName || payload.apellido || 'Nuevo');
-      const email = String(payload.email || `${username}@pos.local`);
+      const email = String(payload.email || `${requestedUsername}@pos.local`);
       const numeroEmpleado = Number(payload.employeeNumber ?? payload.numeroEmpleado ?? 100 + Math.floor(Math.random() * 900));
       const activo = payload.active !== false && payload.activo !== false ? 1 : 0;
       const password = String(payload.temporaryPassword || payload.password || '1234');
+      const pool = getPool();
+      let username;
+      let result;
+      let nextSuffixIndex = 0;
 
-      const [result] = await getPool().execute(
-        `INSERT INTO usuarios (username, password, nombre, apellido, email, numero_empleado, organization_id, role, activo)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [username, password, nombre, apellido, email, numeroEmpleado, organizationId, role, activo]
-      );
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const available = await findAvailableUsername(pool, requestedUsername, organizationId, nextSuffixIndex);
+        username = available.username;
+        try {
+          [result] = await pool.execute(
+            `INSERT INTO usuarios (username, password, nombre, apellido, email, numero_empleado, organization_id, role, activo)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [username, password, nombre, apellido, email, numeroEmpleado, organizationId, role, activo]
+          );
+          break;
+        } catch (error) {
+          if (error.code !== 'ER_DUP_ENTRY' || !String(error.message).includes('username') || attempt === 4) {
+            throw error;
+          }
+          nextSuffixIndex = available.suffixIndex + 1;
+        }
+      }
 
-      const [rows] = await getPool().execute(
+      const [rows] = await pool.execute(
         'SELECT id, username, nombre, apellido, email, numero_empleado, organization_id, role, activo FROM usuarios WHERE id = ? LIMIT 1',
         [result.insertId]
       );

@@ -1,11 +1,20 @@
 import assert from 'node:assert/strict';
 import { authService } from '../services/authService.js';
-import { employeeService } from '../services/employeeService.js';
+import { employeeService, findAvailableUsername } from '../services/employeeService.js';
 import { transactionService } from '../services/transactionService.js';
 import { cajaService } from '../services/cajaService.js';
 
 const main = async () => {
   global.mysqlAvailable = false;
+
+  const existingUsernames = new Set(['cajero']);
+  const availableUsername = await findAvailableUsername({
+    execute: async (_query, [username]) => [
+      existingUsernames.has(username) ? [{ id: 1 }] : [],
+      []
+    ]
+  }, 'cajero', 2);
+  assert.equal(availableUsername.username, 'cajero-2', 'Debe asignar un nombre de usuario único para otra organización');
 
   const login = await authService.login({ username: 'admin', password: '1234' }, false);
   assert.equal(login.error, undefined, 'El login demo debe devolver usuario autenticado');

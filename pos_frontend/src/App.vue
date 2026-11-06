@@ -107,7 +107,8 @@ const menuItems = [
   { label: 'Empleados', to: '/empleados', adminOnly: true },
   { label: 'Configuración', to: '/settings', adminOnly: true },
   { label: 'Suscripción', to: '/suscripcion' },
-  { label: 'Descargas', to: '/descargas' }
+  { label: 'Descargas', to: '/descargas' },
+  { label: 'Atención a clientes', to: '/atencion-clientes' }
 ]
 
 const visibleMenuItems = computed(() => menuItems.filter(item => !item.adminOnly || isAdmin.value))

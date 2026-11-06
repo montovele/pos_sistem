@@ -563,7 +563,11 @@ const handleSubmit = async () => {
 
     const result = response?.data && response.data.data ? response.data.data : response.data
     if (response?.data?.success !== false) {
-      successMessage.value = editingEmpleado.value ? 'Empleado actualizado correctamente' : 'Empleado creado correctamente'
+      successMessage.value = editingEmpleado.value
+        ? 'Empleado actualizado correctamente'
+        : result?.username && result.username !== formData.value.username
+          ? `Empleado creado correctamente. Usuario asignado: ${result.username}`
+          : 'Empleado creado correctamente'
       setTimeout(() => {
         closeModal()
         loadEmpleados()

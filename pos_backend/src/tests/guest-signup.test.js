@@ -28,6 +28,66 @@ test('does not provision an organization before Stripe confirms payment', async 
   assert.equal(connectionRequested, false);
 });
 
+test('retries generated admin usernames when the global username is already taken', async () => {
+  const signup = {
+    id: 'signup-id',
+    nombre_org: 'Tienda',
+    nombre: 'Ana',
+    apellido: 'Lopez',
+    email: 'ana@example.com',
+    telefono: null,
+    stripe_customer_id: 'cus_test',
+    stripe_checkout_session_id: 'cs_test_12345678',
+    status: 'checkout_created',
+    organization_id: null,
+    user_id: null,
+    account_email_sent_at: null,
+    email_resend_allowed: 1
+  };
+  let userInsertAttempts = 0;
+  let insertedUsername;
+  const connection = {
+    beginTransaction: async () => {},
+    commit: async () => {},
+    rollback: async () => {},
+    release: () => {},
+    execute: async (sql, values) => {
+      if (sql.includes('FROM pos_pending_signups')) return [[signup], []];
+      if (sql.includes('SELECT id FROM usuarios WHERE LOWER(email)')) return [[], []];
+      if (sql.includes('INSERT INTO organizaciones')) return [{ insertId: 42 }, []];
+      if (sql.includes('INSERT INTO usuarios')) {
+        userInsertAttempts += 1;
+        if (userInsertAttempts === 1) {
+          throw Object.assign(new Error("Duplicate entry for key 'usuarios.username'"), { code: 'ER_DUP_ENTRY' });
+        }
+        insertedUsername = values[0];
+        return [{ insertId: 9 }, []];
+      }
+      if (sql.includes('SELECT username FROM usuarios')) return [[{ username: insertedUsername }], []];
+      return [{ affectedRows: 1, insertId: 7 }, []];
+    }
+  };
+  const service = createGuestSignupService({
+    pool: {
+      execute: async () => [{ affectedRows: 1 }, []],
+      getConnection: async () => connection
+    },
+    passwordHasher: (password) => `hashed:${password}`
+  });
+
+  const delivery = await service.provisionPaidCheckout({
+    id: 'cs_test_12345678',
+    mode: 'subscription',
+    payment_status: 'paid',
+    customer: 'cus_test',
+    subscription: 'sub_test',
+    metadata: { pending_signup_id: 'signup-id' }
+  });
+
+  assert.equal(userInsertAttempts, 2);
+  assert.match(delivery.username, /^admin-42-[a-f0-9]{16}$/);
+});
+
 test('issues a fresh activation email only for the matching checkout email', async () => {
   const statements = [];
   const signup = {
