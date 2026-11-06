@@ -132,6 +132,12 @@ const getProductReference = (item = {}) => {
     product.productoId,
     product.producto_id
   ];
+  const inventoryItemIdCandidates = [
+    item.inventoryItemId,
+    item.inventory_item_id,
+    product.inventoryItemId,
+    product.inventory_item_id
+  ];
   const codeCandidates = [
     item.codigoProd,
     item.codigo_prod,
@@ -156,6 +162,9 @@ const getProductReference = (item = {}) => {
   ];
 
   const id = idCandidates.map(normalizeProductIdentifier).find((candidate) => candidate !== null && candidate !== undefined && candidate !== '');
+  const inventoryItemId = inventoryItemIdCandidates
+    .map(normalizeProductIdentifier)
+    .find((candidate) => candidate !== null && candidate !== undefined && candidate !== '');
   const code = codeCandidates.map((candidate) => {
     if (candidate === null || candidate === undefined || candidate === '') return null;
     return String(candidate).trim();
@@ -163,6 +172,7 @@ const getProductReference = (item = {}) => {
 
   return {
     id: id ?? null,
+    inventoryItemId: inventoryItemId ?? null,
     code: code ?? null,
     name: item.nombreProd ?? item.nombre_prod ?? product.nombreProd ?? product.nombre_prod ?? item.name ?? product.name ?? ''
   };
@@ -195,7 +205,7 @@ const calculateLineTotals = (item = {}) => {
 
 const getProductForSale = async (item = {}, organizationId = 1) => {
   const reference = getProductReference(item);
-  if (!reference.id && !reference.code) return null;
+  if (!reference.id && !reference.inventoryItemId && !reference.code) return null;
 
   if (global.mysqlAvailable) {
     const [inventoryRows] = await getPool().execute(
@@ -203,16 +213,24 @@ const getProductForSale = async (item = {}, organizationId = 1) => {
         name AS nombre_prod, price, stock, unit, warehouse
        FROM inventario_items
        WHERE organization_id = ? AND active = 1
-         AND ((? > 0 AND (product_id = ? OR id = ?))
-           OR (? != '' AND (sku = ? OR barcode = ?)))
-       ORDER BY CASE WHEN (? != '' AND (sku = ? OR barcode = ?)) THEN 0 ELSE 1 END, id DESC
+         AND ((? > 0 AND id = ?)
+           OR (? != '' AND (sku = ? OR barcode = ?))
+           OR (? > 0 AND product_id = ?))
+       ORDER BY CASE
+         WHEN (? > 0 AND id = ?) THEN 0
+         WHEN (? != '' AND (sku = ? OR barcode = ?)) THEN 1
+         ELSE 2
+       END, id DESC
        LIMIT 1`,
       [
         organizationId,
-        Number(reference.id) || 0,
-        Number(reference.id) || 0,
-        Number(reference.id) || 0,
+        Number(reference.inventoryItemId) || 0,
+        Number(reference.inventoryItemId) || 0,
         reference.code || '', reference.code || '', reference.code || '',
+        Number(reference.id) || 0,
+        Number(reference.id) || 0,
+        Number(reference.inventoryItemId) || 0,
+        Number(reference.inventoryItemId) || 0,
         reference.code || '', reference.code || '', reference.code || ''
       ]
     );
@@ -225,7 +243,26 @@ const getProductForSale = async (item = {}, organizationId = 1) => {
     return rows[0] || null;
   }
 
-  const inventoryItem = await inventoryService.findBySku(reference.code, 'PRINCIPAL', organizationId);
+  if (Number(reference.inventoryItemId) > 0) {
+    const inventoryItem = await inventoryService.findById(reference.inventoryItemId, organizationId);
+    if (inventoryItem) {
+      return {
+        id: inventoryItem.productId,
+        inventoryItemId: inventoryItem.id,
+        codigo_prod: inventoryItem.sku,
+        nombre_prod: inventoryItem.name,
+        price: inventoryItem.price,
+        stock: inventoryItem.stock,
+        unit: inventoryItem.unit,
+        warehouse: inventoryItem.warehouse,
+        inventoryOnly: true
+      };
+    }
+  }
+
+  const inventoryItem = reference.code
+    ? await inventoryService.findBySku(reference.code, 'PRINCIPAL', organizationId)
+    : null;
   if (inventoryItem) {
     return {
       id: inventoryItem.productId,
@@ -253,10 +290,10 @@ const getInventoryStockForProduct = async (product = {}, item = {}, organization
   const productId = Number(product?.id ?? item?.productId ?? item?.product_id ?? 0);
 
   if (global.mysqlAvailable) {
-    if (Number(product?.inventoryItemId) > 0) {
+    if (Number(product?.inventoryItemId ?? item?.inventoryItemId) > 0) {
       const [inventoryRows] = await getPool().execute(
         'SELECT stock FROM inventario_items WHERE id = ? AND organization_id = ? AND active = 1 LIMIT 1',
-        [Number(product.inventoryItemId), organizationId]
+        [Number(product?.inventoryItemId ?? item?.inventoryItemId), organizationId]
       );
       if (inventoryRows[0]) return Number(inventoryRows[0].stock || 0);
     }
@@ -362,7 +399,7 @@ const updateInventoryForTransactionItems = async (items = [], organizationId = 1
       mysqlAvailable: global.mysqlAvailable
     });
 
-    if (!id && !code) {
+    if (!id && !productReference.inventoryItemId && !code) {
       console.warn('[TRANSACTION SERVICE] No se pudo identificar producto para restar stock. Item:', item);
       continue;
     }
@@ -422,7 +459,9 @@ const updateInventoryForTransactionItems = async (items = [], organizationId = 1
       continue;
     }
 
-    const inventoryItem = await inventoryService.findBySku(code, 'PRINCIPAL', organizationId);
+    const inventoryItem = Number(productReference.inventoryItemId) > 0
+      ? await inventoryService.findById(productReference.inventoryItemId, organizationId)
+      : (code ? await inventoryService.findBySku(code, 'PRINCIPAL', organizationId) : null);
     if (inventoryItem) {
       const inventoryStockBefore = Number(inventoryItem.stock || 0);
       if (quantity > inventoryStockBefore) {

@@ -11,7 +11,16 @@ const requireAdmin = (req, res, next) => {
   return next();
 };
 
-const getOrganizationId = (req) => req.user?.organizationId || req.user?.organizacionId || 1;
+const getOrganizationId = (req) => Number(req.user?.organizationId ?? req.user?.organizacionId);
+
+const requireOrganization = (req, res, next) => {
+  const tenantId = getOrganizationId(req);
+  if (!Number.isInteger(tenantId) || tenantId < 1) {
+    return res.status(403).json({ success: false, message: 'El usuario no tiene una organización válida' });
+  }
+  req.user.organizationId = tenantId;
+  return next();
+};
 
 const executeImport = async (rows, source, dryRun, context = {}) => {
   const summary = inventoryImportEngine.summarize(rows);
@@ -36,7 +45,7 @@ const executeImport = async (rows, source, dryRun, context = {}) => {
   };
 };
 
-router.use(requireAuth);
+router.use(requireAuth, requireOrganization);
 
 router.get('/', async (req, res) => {
   const organizationId = getOrganizationId(req);
@@ -129,8 +138,12 @@ router.get('/:sku', async (req, res) => {
 });
 
 router.post('/', requireAdmin, async (req, res) => {
-  const item = await inventoryService.create(req.body || {}, getOrganizationId(req));
-  return res.status(201).json({ success: true, data: item });
+  try {
+    const item = await inventoryService.create(req.body || {}, getOrganizationId(req));
+    return res.status(201).json({ success: true, data: item });
+  } catch (error) {
+    return res.status(error.status || 400).json({ success: false, message: error.message });
+  }
 });
 
 router.post('/import/csv', requireAdmin, async (req, res) => {
@@ -205,7 +218,12 @@ router.post('/import/xlsx', requireAdmin, async (req, res) => {
 });
 
 router.put('/:id', requireAdmin, async (req, res) => {
-  const item = await inventoryService.update(req.params.id, req.body || {}, getOrganizationId(req));
+  let item;
+  try {
+    item = await inventoryService.update(req.params.id, req.body || {}, getOrganizationId(req));
+  } catch (error) {
+    return res.status(error.status || 400).json({ success: false, message: error.message });
+  }
 
   if (!item) {
     return res.status(404).json({ success: false, message: 'Artículo no encontrado' });

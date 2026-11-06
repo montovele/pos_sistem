@@ -44,6 +44,8 @@ export interface LegacyApiResponse<T = any> {
 // Product Types
 export interface Product {
   id: number
+  productId?: number
+  inventoryItemId?: number
   codigoProd: string
   codigoAltern?: string
   nombreProd: string

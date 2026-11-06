@@ -81,9 +81,29 @@ const mapRow = (row) => ({
   active: Boolean(row.active)
 });
 
-const resolveProductId = async ({ sku, productId, organization }, connection = getPool()) => {
+export const resolveProductId = async (
+  { sku, productId, organization, resolveBySku = true },
+  connection = getPool()
+) => {
+  const tenantId = organizationId(organization);
   if (productId !== null && productId !== undefined && productId !== '') {
-    return Number(productId);
+    const id = Number(productId);
+    if (!Number.isInteger(id) || id < 1) {
+      throw Object.assign(new Error('El producto indicado no es válido'), { status: 400 });
+    }
+
+    const [rows] = await connection.execute(
+      'SELECT id FROM productos WHERE org_id = ? AND id = ? LIMIT 1',
+      [tenantId, id]
+    );
+    if (!rows[0]) {
+      throw Object.assign(new Error('El producto indicado no pertenece a la organización actual'), { status: 400 });
+    }
+    return Number(rows[0].id);
+  }
+
+  if (!resolveBySku) {
+    return null;
   }
 
   const normalizedSku = String(sku || '').trim();
@@ -91,7 +111,6 @@ const resolveProductId = async ({ sku, productId, organization }, connection = g
     return null;
   }
 
-  const tenantId = organizationId(organization);
   const [rows] = await connection.execute(
     'SELECT id FROM productos WHERE org_id = ? AND (codigo_prod = ? OR codigo_altern = ?) LIMIT 1',
     [tenantId, normalizedSku, normalizedSku]
@@ -109,7 +128,7 @@ const numericId = (value) => {
 };
 
 const organizationId = (value) => {
-  const id = Number(value || 1);
+  const id = Number(value);
   if (!Number.isInteger(id) || id < 1) {
     throw new Error('La organización debe ser un entero positivo');
   }
@@ -202,7 +221,13 @@ export const inventoryRepository = {
 
     const next = { ...current, ...payload };
     const nextUnit = assertSupportedUnit(next.unit || next.unidad || next.unidadMedida || next.unitMeasure || current.unit || 'PZA');
-    const productId = await resolveProductId({ sku: next.sku, productId: payload.productId ?? current.productId, organization: tenantId }, getPool());
+    const hasProductId = Object.prototype.hasOwnProperty.call(payload, 'productId');
+    const productId = await resolveProductId({
+      sku: next.sku,
+      productId: hasProductId ? payload.productId : current.productId,
+      organization: tenantId,
+      resolveBySku: !hasProductId
+    }, getPool());
     await getPool().execute(
       `UPDATE inventario_items SET
         product_id = ?, sku = ?, barcode = ?, name = ?, category = ?, unit = ?, stock = ?, min_stock = ?,

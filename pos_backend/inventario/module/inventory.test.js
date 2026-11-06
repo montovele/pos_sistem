@@ -4,7 +4,10 @@ import express from 'express';
 import * as XLSX from 'xlsx';
 import { inventoryImportEngine } from '../engine/importEngine.js';
 import { inventoryService } from './inventoryService.js';
+import { resolveProductId } from './inventoryRepository.js';
+import { productService } from '../../src/services/productService.js';
 import { inventoryRoutes } from './inventory.routes.js';
+import productsRoutes from '../../src/routes/products.routes.js';
 
 test('importa CSV con comas entrecomilladas y detecta duplicados', async () => {
   const csv = [
@@ -188,6 +191,79 @@ test('admin puede registrar movimientos y actualizar stock en modo demo', async 
   assert.equal(movement.stockBefore, beforeStock);
   assert.equal(movement.stockAfter, beforeStock + 3);
   assert.equal(after.stock, beforeStock + 3);
+});
+
+test('el modo demo separa inventarios, búsquedas, actualizaciones y movimientos por organización', async () => {
+  global.mysqlAvailable = false;
+  const organizationOneBefore = await inventoryService.list({ organizationId: 1 });
+  const created = await inventoryService.create({
+    sku: 'SKU-ORG-ISOLATION',
+    name: 'Producto de otra organización',
+    stock: 5
+  }, 2);
+
+  assert.equal(created.organizationId, 2);
+  assert.equal((await inventoryService.findBySku('SKU-ORG-ISOLATION', 'PRINCIPAL', 1)), null);
+  assert.equal((await inventoryService.findById(created.id, 1)), null);
+  assert.equal((await inventoryService.list({ organizationId: 1 })).total, organizationOneBefore.total);
+  assert.equal((await inventoryService.list({ organizationId: 2 })).data[0].sku, 'SKU-ORG-ISOLATION');
+  assert.equal(await inventoryService.update(created.id, { stock: 0 }, 1), null);
+
+  const organizationOneMovementsBefore = (await inventoryService.listMovements({ organizationId: 1 })).total;
+  await inventoryService.createMovement({
+    sku: created.sku,
+    movementType: 'ENTRY',
+    quantity: 2
+  }, { organizationId: 2 });
+  assert.equal((await inventoryService.listMovements({ organizationId: 1 })).total, organizationOneMovementsBefore);
+  assert.equal((await inventoryService.listMovements({ organizationId: 2 })).total, 1);
+});
+
+test('rechaza productId de otra organización en el resolvedor de inventario', async () => {
+  const scopedConnection = {
+    async execute(_query, params) {
+      return params[0] === 1 && params[1] === 7 ? [[{ id: 7 }]] : [[]];
+    }
+  };
+
+  assert.equal(await resolveProductId({ productId: 7, organization: 1 }, scopedConnection), 7);
+  await assert.rejects(
+    resolveProductId({ productId: 7, organization: 2 }, scopedConnection),
+    /no pertenece a la organización actual/
+  );
+});
+
+test('la ruta de compatibilidad de inventario requiere sesión y usa la organización autenticada', async () => {
+  global.mysqlAvailable = false;
+  assert.equal((await productService.list({ organizationId: 2 })).total, 0);
+  assert.equal(await productService.findById(1, 2), null);
+  assert.equal(await productService.findByCode('P001', 2), null);
+
+  const app = express();
+  app.use('/api/products', productsRoutes);
+  const server = app.listen(0);
+
+  try {
+    await new Promise((resolve) => server.once('listening', resolve));
+    const url = `http://127.0.0.1:${server.address().port}/api/products?perPage=200&organizationId=2`;
+    const unauthorized = await fetch(url);
+    const response = await fetch(url, { headers: { authorization: 'Bearer demo-token-1' } });
+    const body = await response.json();
+    const catalogResponse = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/products?organizationId=2`,
+      { headers: { authorization: 'Bearer demo-token-1' } }
+    );
+    const catalogBody = await catalogResponse.json();
+
+    assert.equal(unauthorized.status, 401);
+    assert.equal(response.status, 200);
+    assert.equal(body.data.some((item) => item.sku === 'SKU-ORG-ISOLATION'), false);
+    assert.equal(body.data.every((item) => Number(item.organizationId) === 1), true);
+    assert.equal(catalogResponse.status, 200);
+    assert.equal(catalogBody.data.every((item) => Number(item.org_id) === 1), true);
+  } finally {
+    server.close();
+  }
 });
 
 test('admin puede consultar el resumen y cashier recibe 403', async () => {

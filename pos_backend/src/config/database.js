@@ -104,6 +104,7 @@ const ensureLegacyCompatibilitySchema = async (connection) => {
   const productColumnMigrations = [
     ['unit', "ALTER TABLE productos ADD COLUMN unit VARCHAR(3) NOT NULL DEFAULT 'PZA' AFTER stock"],
     ['sale_by_weight', 'ALTER TABLE productos ADD COLUMN sale_by_weight TINYINT(1) NOT NULL DEFAULT 0 AFTER unit'],
+    ['org_id', 'ALTER TABLE productos ADD COLUMN org_id INT NOT NULL DEFAULT 1 AFTER sale_by_weight'],
     ['stock_decimal', 'ALTER TABLE productos MODIFY COLUMN stock DECIMAL(12,3) NOT NULL DEFAULT 0']
   ];
 
@@ -115,6 +116,53 @@ const ensureLegacyCompatibilitySchema = async (connection) => {
 
   await connection.execute("UPDATE productos SET unit = CASE WHEN sale_by_weight = 1 THEN 'KG' ELSE 'PZA' END WHERE unit IS NULL OR unit NOT IN ('KG', 'PZA')");
   await connection.execute("UPDATE productos SET sale_by_weight = CASE WHEN unit = 'KG' THEN 1 ELSE 0 END");
+
+  const [productIndexes] = await connection.execute('SHOW INDEX FROM productos');
+  const indexesByName = new Map();
+  for (const index of productIndexes) {
+    const entries = indexesByName.get(index.Key_name) || [];
+    entries.push(index);
+    indexesByName.set(index.Key_name, entries);
+  }
+  for (const entries of indexesByName.values()) {
+    entries.sort((left, right) => Number(left.Seq_in_index) - Number(right.Seq_in_index));
+  }
+  const [duplicateProductCodes] = await connection.execute(
+    `SELECT org_id, codigo_prod, COUNT(*) AS total
+     FROM productos
+     GROUP BY org_id, codigo_prod
+     HAVING COUNT(*) > 1
+     LIMIT 1`
+  );
+  if (duplicateProductCodes.length > 0) {
+    throw new Error('Hay códigos de producto duplicados dentro de una organización; resuélvelos antes de aplicar la restricción de inventario multi-organización.');
+  }
+  for (const [name, entries] of indexesByName) {
+    if (
+      name !== 'PRIMARY' &&
+      Number(entries[0].Non_unique) === 0 &&
+      entries.length === 1 &&
+      entries[0].Column_name === 'codigo_prod'
+    ) {
+      await connection.execute(`ALTER TABLE productos DROP INDEX \`${name.replace(/`/g, '``')}\``);
+    }
+  }
+  if (!Array.from(indexesByName.values()).some((entries) => (
+    entries.length === 2 &&
+    entries[0].Column_name === 'org_id' &&
+    entries[1].Column_name === 'codigo_prod' &&
+    Number(entries[0].Non_unique) === 0
+  ))) {
+    await connection.execute('CREATE UNIQUE INDEX uq_product_org_code ON productos (org_id, codigo_prod)');
+  }
+  if (!Array.from(indexesByName.values()).some((entries) => (
+    entries.length === 2 &&
+    entries[0].Column_name === 'org_id' &&
+    entries[1].Column_name === 'id' &&
+    Number(entries[0].Non_unique) === 0
+  ))) {
+    await connection.execute('CREATE UNIQUE INDEX uq_product_org_id_id ON productos (org_id, id)');
+  }
 
   await connection.execute(`
     INSERT INTO productos (codigo_prod, codigo_altern, nombre_prod, price, stock, org_id, id_category, description, image)
@@ -197,12 +245,170 @@ const ensureLegacyCompatibilitySchema = async (connection) => {
   `);
 };
 
+const ensureInventoryOrganizationForeignKey = async (connection, tableName, constraintName) => {
+  const [orphanRows] = await connection.execute(
+    `SELECT COUNT(*) AS total
+     FROM \`${tableName}\` inventory
+     LEFT JOIN organizaciones organization ON organization.id = inventory.organization_id
+     WHERE organization.id IS NULL`
+  );
+  const orphanCount = Number(orphanRows[0]?.total || 0);
+  if (orphanCount > 0) {
+    throw new Error(`${tableName} contiene ${orphanCount} registros con una organización inexistente; corrige esos registros antes de iniciar el servicio.`);
+  }
+
+  const [foreignKeys] = await connection.execute(
+    `SELECT CONSTRAINT_NAME
+     FROM information_schema.KEY_COLUMN_USAGE
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+       AND COLUMN_NAME = 'organization_id'
+       AND REFERENCED_TABLE_NAME = 'organizaciones'`,
+    [tableName]
+  );
+  if (foreignKeys.length === 0) {
+    await connection.execute(
+      `ALTER TABLE \`${tableName}\`
+       ADD CONSTRAINT \`${constraintName}\`
+       FOREIGN KEY (organization_id) REFERENCES organizaciones(id)
+       ON DELETE RESTRICT ON UPDATE CASCADE`
+    );
+  }
+};
+
+const ensureScopedInventoryProductForeignKey = async (connection, tableName, indexName, constraintName) => {
+  const [invalidRows] = await connection.execute(
+    `SELECT COUNT(*) AS total
+     FROM \`${tableName}\` inventory
+     LEFT JOIN productos product
+       ON product.id = inventory.product_id
+      AND product.org_id = inventory.organization_id
+     WHERE inventory.product_id IS NOT NULL AND product.id IS NULL`
+  );
+  const invalidCount = Number(invalidRows[0]?.total || 0);
+  if (invalidCount > 0) {
+    console.warn(`[INVENTARIO] Se desvinculan ${invalidCount} referencias de producto inconsistentes en ${tableName}; se conservan los registros de inventario.`);
+    await connection.execute(
+      `UPDATE \`${tableName}\` inventory
+       LEFT JOIN productos product
+         ON product.id = inventory.product_id
+        AND product.org_id = inventory.organization_id
+       SET inventory.product_id = NULL
+       WHERE inventory.product_id IS NOT NULL AND product.id IS NULL`
+    );
+  }
+
+  const [indexes] = await connection.execute(`SHOW INDEX FROM \`${tableName}\``);
+  if (!indexes.some((index) => index.Key_name === indexName)) {
+    await connection.execute(`CREATE INDEX \`${indexName}\` ON \`${tableName}\` (organization_id, product_id)`);
+  }
+
+  const [foreignKeys] = await connection.execute(
+    `SELECT DISTINCT CONSTRAINT_NAME
+     FROM information_schema.KEY_COLUMN_USAGE
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+       AND REFERENCED_TABLE_NAME = 'productos'
+       AND COLUMN_NAME = 'product_id'`,
+    [tableName]
+  );
+  for (const foreignKey of foreignKeys) {
+    if (foreignKey.CONSTRAINT_NAME !== constraintName) {
+      const name = String(foreignKey.CONSTRAINT_NAME).replace(/`/g, '``');
+      await connection.execute(`ALTER TABLE \`${tableName}\` DROP FOREIGN KEY \`${name}\``);
+    }
+  }
+  if (!foreignKeys.some((foreignKey) => foreignKey.CONSTRAINT_NAME === constraintName)) {
+    await connection.execute(
+      `ALTER TABLE \`${tableName}\`
+       ADD CONSTRAINT \`${constraintName}\`
+       FOREIGN KEY (organization_id, product_id)
+       REFERENCES productos (org_id, id)
+       ON DELETE RESTRICT ON UPDATE CASCADE`
+    );
+  }
+};
+
+const dropLegacyInventoryProductForeignKeys = async (connection, tableName, constraintName) => {
+  const [foreignKeys] = await connection.execute(
+    `SELECT DISTINCT CONSTRAINT_NAME
+     FROM information_schema.KEY_COLUMN_USAGE
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+       AND REFERENCED_TABLE_NAME = 'productos'
+       AND COLUMN_NAME = 'product_id'`,
+    [tableName]
+  );
+  for (const foreignKey of foreignKeys) {
+    if (foreignKey.CONSTRAINT_NAME !== constraintName) {
+      const name = String(foreignKey.CONSTRAINT_NAME).replace(/`/g, '``');
+      await connection.execute(`ALTER TABLE \`${tableName}\` DROP FOREIGN KEY \`${name}\``);
+    }
+  }
+};
+
+const ensureScopedInventoryItemForeignKey = async (connection) => {
+  const [invalidRows] = await connection.execute(
+    `SELECT COUNT(*) AS total
+     FROM inventario_movimientos movement
+     LEFT JOIN inventario_items item
+       ON item.id = movement.inventario_item_id
+      AND item.organization_id = movement.organization_id
+     WHERE movement.inventario_item_id IS NOT NULL AND item.id IS NULL`
+  );
+  const invalidCount = Number(invalidRows[0]?.total || 0);
+  if (invalidCount > 0) {
+    console.warn(`[INVENTARIO] Se desvinculan ${invalidCount} movimientos de artículos de otra organización; se conserva el historial.`);
+    await connection.execute(
+      `UPDATE inventario_movimientos movement
+       LEFT JOIN inventario_items item
+         ON item.id = movement.inventario_item_id
+        AND item.organization_id = movement.organization_id
+       SET movement.inventario_item_id = NULL
+       WHERE movement.inventario_item_id IS NOT NULL AND item.id IS NULL`
+    );
+  }
+
+  const [itemIndexes] = await connection.execute('SHOW INDEX FROM inventario_items');
+  if (!itemIndexes.some((index) => index.Key_name === 'uq_inventario_org_id_id')) {
+    await connection.execute('CREATE UNIQUE INDEX uq_inventario_org_id_id ON inventario_items (organization_id, id)');
+  }
+  const [movementIndexes] = await connection.execute('SHOW INDEX FROM inventario_movimientos');
+  if (!movementIndexes.some((index) => index.Key_name === 'idx_inventario_movimientos_org_item')) {
+    await connection.execute('CREATE INDEX idx_inventario_movimientos_org_item ON inventario_movimientos (organization_id, inventario_item_id)');
+  }
+
+  const [foreignKeys] = await connection.execute(
+    `SELECT DISTINCT CONSTRAINT_NAME
+     FROM information_schema.KEY_COLUMN_USAGE
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'inventario_movimientos'
+       AND REFERENCED_TABLE_NAME = 'inventario_items'
+       AND COLUMN_NAME = 'inventario_item_id'`
+  );
+  for (const foreignKey of foreignKeys) {
+    if (foreignKey.CONSTRAINT_NAME !== 'fk_inventario_movimientos_org_item') {
+      const name = String(foreignKey.CONSTRAINT_NAME).replace(/`/g, '``');
+      await connection.execute(`ALTER TABLE inventario_movimientos DROP FOREIGN KEY \`${name}\``);
+    }
+  }
+  if (!foreignKeys.some((foreignKey) => foreignKey.CONSTRAINT_NAME === 'fk_inventario_movimientos_org_item')) {
+    await connection.execute(
+      `ALTER TABLE inventario_movimientos
+       ADD CONSTRAINT fk_inventario_movimientos_org_item
+       FOREIGN KEY (organization_id, inventario_item_id)
+       REFERENCES inventario_items (organization_id, id)
+       ON DELETE RESTRICT ON UPDATE CASCADE`
+    );
+  }
+};
+
 const ensureInventorySchema = async (connection) => {
   await connection.execute(`
     CREATE TABLE IF NOT EXISTS inventario_items (
       id BIGINT PRIMARY KEY AUTO_INCREMENT,
       organization_id INT NOT NULL DEFAULT 1,
-      product_id BIGINT NULL,
+      product_id INT NULL,
       sku VARCHAR(100) NOT NULL,
       barcode VARCHAR(100) DEFAULT NULL,
       name VARCHAR(255) NOT NULL,
@@ -217,9 +423,12 @@ const ensureInventorySchema = async (connection) => {
       active TINYINT(1) NOT NULL DEFAULT 1,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      CONSTRAINT fk_inventario_item_product
-        FOREIGN KEY (product_id) REFERENCES productos(id) ON DELETE SET NULL,
+      CONSTRAINT fk_inventario_item_org_product
+        FOREIGN KEY (organization_id, product_id) REFERENCES productos(org_id, id) ON DELETE RESTRICT ON UPDATE CASCADE,
+      CONSTRAINT fk_inventario_item_organization
+        FOREIGN KEY (organization_id) REFERENCES organizaciones(id) ON DELETE RESTRICT ON UPDATE CASCADE,
       UNIQUE KEY uq_inventario_org_sku_almacen (organization_id, sku, warehouse),
+      UNIQUE KEY uq_inventario_org_id_id (organization_id, id),
       INDEX idx_inventario_nombre (name),
       INDEX idx_inventario_stock (warehouse, stock, min_stock)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -242,7 +451,9 @@ const ensureInventorySchema = async (connection) => {
       username VARCHAR(100) DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_inventario_importaciones_fecha (created_at),
-      INDEX idx_inventario_importaciones_usuario (user_id)
+      INDEX idx_inventario_importaciones_usuario (user_id),
+      CONSTRAINT fk_inventario_importaciones_organization
+        FOREIGN KEY (organization_id) REFERENCES organizaciones(id) ON DELETE RESTRICT ON UPDATE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
@@ -250,7 +461,7 @@ const ensureInventorySchema = async (connection) => {
     CREATE TABLE IF NOT EXISTS inventario_movimientos (
       id BIGINT PRIMARY KEY AUTO_INCREMENT,
       organization_id INT NOT NULL DEFAULT 1,
-      product_id BIGINT NULL,
+      product_id INT NULL,
       inventario_item_id BIGINT DEFAULT NULL,
       sku VARCHAR(100) NOT NULL,
       warehouse VARCHAR(100) NOT NULL DEFAULT 'PRINCIPAL',
@@ -264,23 +475,52 @@ const ensureInventorySchema = async (connection) => {
       user_id BIGINT DEFAULT NULL,
       username VARCHAR(100) DEFAULT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      CONSTRAINT fk_inventario_movimientos_item FOREIGN KEY (inventario_item_id)
-        REFERENCES inventario_items(id) ON DELETE SET NULL,
-      CONSTRAINT fk_inventario_movimientos_product
-        FOREIGN KEY (product_id) REFERENCES productos(id) ON DELETE SET NULL,
+      CONSTRAINT fk_inventario_movimientos_org_item
+        FOREIGN KEY (organization_id, inventario_item_id)
+        REFERENCES inventario_items(organization_id, id) ON DELETE RESTRICT ON UPDATE CASCADE,
+      CONSTRAINT fk_inventario_movimientos_org_product
+        FOREIGN KEY (organization_id, product_id) REFERENCES productos(org_id, id) ON DELETE RESTRICT ON UPDATE CASCADE,
+      CONSTRAINT fk_inventario_movimientos_organization
+        FOREIGN KEY (organization_id) REFERENCES organizaciones(id) ON DELETE RESTRICT ON UPDATE CASCADE,
       INDEX idx_inventario_movimientos_org_fecha (organization_id, created_at),
       INDEX idx_inventario_movimientos_sku (organization_id, sku, warehouse)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
+  await dropLegacyInventoryProductForeignKeys(
+    connection,
+    'inventario_items',
+    'fk_inventario_item_org_product'
+  );
+  await dropLegacyInventoryProductForeignKeys(
+    connection,
+    'inventario_movimientos',
+    'fk_inventario_movimientos_org_product'
+  );
+
   const [itemColumns] = await connection.execute('SHOW COLUMNS FROM inventario_items');
+  if (!itemColumns.some((column) => column.Field === 'organization_id')) {
+    await connection.execute('ALTER TABLE inventario_items ADD COLUMN organization_id INT NOT NULL DEFAULT 1 AFTER id');
+  }
   if (!itemColumns.some((column) => column.Field === 'product_id')) {
-    await connection.execute('ALTER TABLE inventario_items ADD COLUMN product_id BIGINT NULL AFTER organization_id');
+    await connection.execute('ALTER TABLE inventario_items ADD COLUMN product_id INT NULL AFTER organization_id');
+  } else if (String(itemColumns.find((column) => column.Field === 'product_id').Type).toLowerCase().replace(/\(\d+\)/, '') !== 'int') {
+    await connection.execute('ALTER TABLE inventario_items MODIFY COLUMN product_id INT NULL');
   }
 
   const [importColumns] = await connection.execute('SHOW COLUMNS FROM inventario_importaciones');
   if (!importColumns.some((column) => column.Field === 'organization_id')) {
     await connection.execute('ALTER TABLE inventario_importaciones ADD COLUMN organization_id INT NOT NULL DEFAULT 1 AFTER id');
+  }
+
+  const [movementColumns] = await connection.execute('SHOW COLUMNS FROM inventario_movimientos');
+  if (!movementColumns.some((column) => column.Field === 'organization_id')) {
+    await connection.execute('ALTER TABLE inventario_movimientos ADD COLUMN organization_id INT NOT NULL DEFAULT 1 AFTER id');
+  }
+  if (!movementColumns.some((column) => column.Field === 'product_id')) {
+    await connection.execute('ALTER TABLE inventario_movimientos ADD COLUMN product_id INT NULL AFTER organization_id');
+  } else if (String(movementColumns.find((column) => column.Field === 'product_id').Type).toLowerCase().replace(/\(\d+\)/, '') !== 'int') {
+    await connection.execute('ALTER TABLE inventario_movimientos MODIFY COLUMN product_id INT NULL');
   }
 
   const [itemIndexes] = await connection.execute('SHOW INDEX FROM inventario_items');
@@ -291,10 +531,24 @@ const ensureInventorySchema = async (connection) => {
     await connection.execute('ALTER TABLE inventario_items ADD UNIQUE KEY uq_inventario_org_sku_almacen (organization_id, sku, warehouse)');
   }
 
-  const [movementColumns] = await connection.execute('SHOW COLUMNS FROM inventario_movimientos');
-  if (!movementColumns.some((column) => column.Field === 'product_id')) {
-    await connection.execute('ALTER TABLE inventario_movimientos ADD COLUMN product_id BIGINT NULL AFTER organization_id');
-  }
+  await ensureInventoryOrganizationForeignKey(connection, 'inventario_items', 'fk_inventario_item_organization');
+  await ensureInventoryOrganizationForeignKey(connection, 'inventario_importaciones', 'fk_inventario_importaciones_organization');
+  await ensureInventoryOrganizationForeignKey(connection, 'inventario_movimientos', 'fk_inventario_movimientos_organization');
+
+  await ensureScopedInventoryProductForeignKey(
+    connection,
+    'inventario_items',
+    'idx_inventario_org_product',
+    'fk_inventario_item_org_product'
+  );
+  await ensureScopedInventoryProductForeignKey(
+    connection,
+    'inventario_movimientos',
+    'idx_inventario_movimientos_org_product',
+    'fk_inventario_movimientos_org_product'
+  );
+  await ensureScopedInventoryItemForeignKey(connection);
+
   await connection.execute(`
     CREATE TABLE IF NOT EXISTS inventario_importacion_filas (
       id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -517,16 +771,18 @@ const ensureSubscriptionSchema = async (connection) => {
 };
 
 export const initializeDatabase = async () => {
+  let connection;
   try {
-    const connection = await getPool().getConnection();
+    connection = await getPool().getConnection();
     await ensureLegacyCompatibilitySchema(connection);
     await ensureInventorySchema(connection);
     await ensureSubscriptionSchema(connection);
-    connection.release();
     return true;
   } catch (error) {
     console.error('Error al inicializar la base de datos:', error.message);
     return false;
+  } finally {
+    connection?.release();
   }
 };
 

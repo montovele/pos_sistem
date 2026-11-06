@@ -88,9 +88,20 @@ const normalizeProduct = (row = {}) => {
 const productFields = `id, codigo_prod, codigo_altern, nombre_prod, price, stock, unit, sale_by_weight,
   org_id, id_category, description, image`;
 
+const normalizeOrganizationId = (value = 1) => {
+  const id = Number(value);
+  if (!Number.isInteger(id) || id < 1) {
+    throw new Error('La organización debe ser un entero positivo');
+  }
+  return id;
+};
+
 const fromDemoProducts = (query = {}) => {
   const { search, category, lowStockOnly } = query;
-  let data = demoProducts.map((item) => normalizeProduct(item));
+  const tenantId = normalizeOrganizationId(query.organizationId);
+  let data = demoProducts
+    .filter((item) => Number(item.org_id ?? item.organizationId ?? 1) === tenantId)
+    .map((item) => normalizeProduct(item));
 
   if (search) {
     const value = String(search).toLowerCase();
@@ -113,19 +124,21 @@ const fromDemoProducts = (query = {}) => {
 };
 
 export const productService = {
-  async list({ search, page = 1, perPage = 50, category, lowStockOnly } = {}) {
+  async list({ search, page = 1, perPage = 50, category, lowStockOnly, organizationId = 1 } = {}) {
+    const tenantId = normalizeOrganizationId(organizationId);
     let data = [];
 
     if (!global.mysqlAvailable) {
-      data = fromDemoProducts({ search, category, lowStockOnly });
+      data = fromDemoProducts({ search, category, lowStockOnly, organizationId: tenantId });
     } else {
       try {
         const [rows] = await getPool().execute(
           `SELECT ${productFields}
            FROM productos
-           WHERE (? IS NULL OR nombre_prod LIKE ? OR codigo_prod LIKE ?)
+           WHERE org_id = ?
+             AND (? IS NULL OR nombre_prod LIKE ? OR codigo_prod LIKE ?)
            ORDER BY id ASC`,
-          [search || null, search ? `%${search}%` : '%', search ? `%${search}%` : '%']
+          [tenantId, search || null, search ? `%${search}%` : '%', search ? `%${search}%` : '%']
         );
 
         data = rows.map(normalizeProduct);
@@ -166,17 +179,21 @@ export const productService = {
     };
   },
 
-  async findByCode(code) {
+  async findByCode(code, organizationId = 1) {
+    const tenantId = normalizeOrganizationId(organizationId);
     if (!global.mysqlAvailable) {
       const normalizedCode = String(code || '').trim();
-      const product = demoProducts.find((item) => item.codigoProd === normalizedCode || item.codigoAltern === normalizedCode);
+      const product = demoProducts.find((item) => (
+        Number(item.org_id ?? item.organizationId ?? 1) === tenantId &&
+        (item.codigoProd === normalizedCode || item.codigoAltern === normalizedCode)
+      ));
       return product ? normalizeProduct(product) : null;
     }
 
     try {
       const [rows] = await getPool().execute(
-        `SELECT ${productFields} FROM productos WHERE codigo_prod = ? OR codigo_altern = ? LIMIT 1`,
-        [String(code || '').trim(), String(code || '').trim()]
+        `SELECT ${productFields} FROM productos WHERE org_id = ? AND (codigo_prod = ? OR codigo_altern = ?) LIMIT 1`,
+        [tenantId, String(code || '').trim(), String(code || '').trim()]
       );
 
       return rows[0] ? normalizeProduct(rows[0]) : null;
@@ -186,15 +203,16 @@ export const productService = {
     }
   },
 
-  async findByCategory(categoryId) {
+  async findByCategory(categoryId, organizationId = 1) {
+    const tenantId = normalizeOrganizationId(organizationId);
     if (!global.mysqlAvailable) {
-      return fromDemoProducts({ category: categoryId });
+      return fromDemoProducts({ category: categoryId, organizationId: tenantId });
     }
 
     try {
       const [rows] = await getPool().execute(
-        `SELECT ${productFields} FROM productos WHERE id_category = ? ORDER BY id ASC`,
-        [Number(categoryId)]
+        `SELECT ${productFields} FROM productos WHERE org_id = ? AND id_category = ? ORDER BY id ASC`,
+        [tenantId, Number(categoryId)]
       );
 
       return rows.map(normalizeProduct);
@@ -204,16 +222,20 @@ export const productService = {
     }
   },
 
-  async findById(id) {
+  async findById(id, organizationId = 1) {
+    const tenantId = normalizeOrganizationId(organizationId);
     if (!global.mysqlAvailable) {
-      const product = demoProducts.find((item) => String(item.id) === String(id));
+      const product = demoProducts.find((item) => (
+        String(item.id) === String(id) &&
+        Number(item.org_id ?? item.organizationId ?? 1) === tenantId
+      ));
       return product ? normalizeProduct(product) : null;
     }
 
     try {
       const [rows] = await getPool().execute(
-        `SELECT ${productFields} FROM productos WHERE id = ? LIMIT 1`,
-        [Number(id)]
+        `SELECT ${productFields} FROM productos WHERE id = ? AND org_id = ? LIMIT 1`,
+        [Number(id), tenantId]
       );
 
       return rows[0] ? normalizeProduct(rows[0]) : null;
@@ -223,11 +245,15 @@ export const productService = {
     }
   },
 
-  async update(id, payload) {
+  async update(id, payload, organizationId = 1) {
     const productId = Number(id);
+    const tenantId = normalizeOrganizationId(organizationId);
 
     if (!global.mysqlAvailable) {
-      const productIndex = demoProducts.findIndex((item) => String(item.id) === String(productId));
+      const productIndex = demoProducts.findIndex((item) => (
+        String(item.id) === String(productId) &&
+        Number(item.org_id ?? item.organizationId ?? 1) === tenantId
+      ));
       if (productIndex < 0) {
         return null;
       }
@@ -244,7 +270,7 @@ export const productService = {
         price: Number(payload.price ?? existing.price ?? 0),
         stock: Number(payload.stock ?? existing.stock ?? 0),
         id_category: Number(payload.id_category ?? payload.idCategory ?? existing.id_category ?? 1),
-        org_id: Number(payload.org_id ?? existing.org_id ?? 1)
+        org_id: tenantId
       };
 
       if (payload.saleByWeight !== undefined && typeof payload.saleByWeight !== 'boolean') {
@@ -260,7 +286,7 @@ export const productService = {
     }
 
     try {
-      const currentProduct = await this.findById(productId);
+      const currentProduct = await this.findById(productId, tenantId);
       const nextUnit = normalizeUnit(payload.unit || payload.unidad || payload.unidadVenta || currentProduct?.unit || 'PZA');
       if (payload.saleByWeight !== undefined && typeof payload.saleByWeight !== 'boolean') {
         throw new Error('saleByWeight debe ser booleano');
@@ -270,7 +296,7 @@ export const productService = {
       }
 
       const [result] = await getPool().execute(
-        `UPDATE productos SET codigo_prod = ?, codigo_altern = ?, nombre_prod = ?, price = ?, stock = ?, unit = ?, sale_by_weight = ?, org_id = ?, id_category = ?, description = ?, image = ? WHERE id = ?`,
+        `UPDATE productos SET codigo_prod = ?, codigo_altern = ?, nombre_prod = ?, price = ?, stock = ?, unit = ?, sale_by_weight = ?, id_category = ?, description = ?, image = ? WHERE id = ? AND org_id = ?`,
         [
           payload.codigoProd || payload.codigo_prod || '',
           payload.codigoAltern || payload.codigo_altern || '',
@@ -279,16 +305,16 @@ export const productService = {
           Number(payload.stock ?? 0),
           nextUnit,
           nextUnit === 'KG' ? 1 : 0,
-          Number(payload.org_id ?? 1),
           Number(payload.id_category ?? 1),
           payload.description || '',
           payload.image || '',
-          productId
+          productId,
+          tenantId
         ]
       );
 
       if (result.affectedRows > 0) {
-        return await this.findById(productId);
+        return await this.findById(productId, tenantId);
       }
 
       return null;

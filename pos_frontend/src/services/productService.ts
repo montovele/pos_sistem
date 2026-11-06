@@ -95,6 +95,8 @@ class ProductService {
 
     return {
       id: Number(item?.productId ?? item?.id ?? 0),
+      productId: Number(item?.productId ?? 0) || undefined,
+      inventoryItemId: Number(item?.id ?? 0) || undefined,
       codigoProd: String(item?.sku ?? item?.codigoProd ?? item?.codigo ?? item?.id ?? 'SIN-CODIGO'),
       codigoAltern: item?.barcode ? String(item.barcode) : undefined,
       nombreProd: String(item?.name ?? item?.nombreProd ?? item?.nombre ?? 'Producto sin nombre'),

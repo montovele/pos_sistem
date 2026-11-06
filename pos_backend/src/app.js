@@ -72,7 +72,7 @@ const startServer = async () => {
     if (global.mysqlAvailable) {
       const dbReady = await initializeDatabase();
       if (!dbReady) {
-        console.warn('La base de datos no quedó inicializada correctamente.');
+        throw new Error('La base de datos no quedó inicializada correctamente; se cancela el inicio para evitar operar con aislamiento incompleto.');
       }
     } else if (demoModeEnabled) {
       console.warn('Modo demo activo: la app usa datos en memoria.');

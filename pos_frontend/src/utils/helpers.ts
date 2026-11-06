@@ -109,7 +109,8 @@ export const normalizeSaleItem = (item: any) => {
   const discount = Number(calculateLineDiscount(price, quantity, discountRate).toFixed(2))
 
   return {
-    productId: Number(item?.productId ?? product.id ?? 0),
+    productId: Number(item?.productId ?? product.productId ?? (product.inventoryItemId ? 0 : product.id) ?? 0),
+    inventoryItemId: Number(item?.inventoryItemId ?? product.inventoryItemId ?? 0) || undefined,
     codigoProd: item?.codigoProd ?? product.codigoProd ?? '',
     nombreProd: item?.nombreProd ?? product.nombreProd ?? '',
     quantity,

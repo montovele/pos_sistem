@@ -1,4 +1,5 @@
 import { inventoryRepository } from './inventoryRepository.js';
+import { products as demoProducts } from '../../src/data/demoData.js';
 
 const SUPPORTED_UNITS = new Set([
   'PZA',
@@ -62,22 +63,66 @@ const isSupportedUnit = (value) => {
   return SUPPORTED_UNITS.has(normalized) || SUPPORTED_UNITS.has(String(value || '').trim().toUpperCase());
 };
 
-const defaultInventory = [
-  {
-    id: 1,
-    sku: 'SKU-001',
-    name: 'Producto demo',
-    category: 'Bebidas',
-    unit: 'PZA',
-    stock: 25,
-    minStock: 5,
-    cost: 18.5,
-    price: 29.99,
-    warehouse: 'PRINCIPAL',
-    active: true
+const defaultInventory = new Map([[1, [{
+  id: 1,
+  organizationId: 1,
+  productId: null,
+  sku: 'SKU-001',
+  name: 'Producto demo',
+  category: 'Bebidas',
+  unit: 'PZA',
+  stock: 25,
+  minStock: 5,
+  cost: 18.5,
+  price: 29.99,
+  warehouse: 'PRINCIPAL',
+  active: true
+}]]]);
+const demoMovements = new Map();
+
+const normalizeOrganizationId = (value = 1) => {
+  const id = Number(value);
+  if (!Number.isInteger(id) || id < 1) {
+    throw new Error('La organización debe ser un entero positivo');
   }
-];
-const demoMovements = [];
+  return id;
+};
+
+const getDemoInventory = (value = 1, create = false) => {
+  const tenantId = normalizeOrganizationId(value);
+  if (!defaultInventory.has(tenantId) && create) {
+    defaultInventory.set(tenantId, []);
+  }
+  return defaultInventory.get(tenantId) || [];
+};
+
+const getDemoMovements = (value = 1, create = false) => {
+  const tenantId = normalizeOrganizationId(value);
+  if (!demoMovements.has(tenantId) && create) {
+    demoMovements.set(tenantId, []);
+  }
+  return demoMovements.get(tenantId) || [];
+};
+
+const resolveDemoProductId = ({ productId, sku, organizationId, resolveBySku = true }) => {
+  const tenantId = normalizeOrganizationId(organizationId);
+  if (productId !== null && productId !== undefined && productId !== '') {
+    const id = Number(productId);
+    const product = demoProducts.find((item) => Number(item.id) === id && Number(item.org_id ?? item.organizationId ?? 1) === tenantId);
+    if (!Number.isInteger(id) || id < 1 || !product) {
+      throw Object.assign(new Error('El producto indicado no pertenece a la organización actual'), { status: 400 });
+    }
+    return id;
+  }
+  if (!resolveBySku) return null;
+
+  const normalizedSku = String(sku || '').trim().toLowerCase();
+  const product = demoProducts.find((item) => (
+    Number(item.org_id ?? item.organizationId ?? 1) === tenantId &&
+    [item.sku, item.codigoProd, item.codigoAltern].some((code) => String(code || '').trim().toLowerCase() === normalizedSku)
+  ));
+  return product ? Number(product.id) : null;
+};
 
 export const inventoryService = {
   async list(filters = {}) {
@@ -86,7 +131,10 @@ export const inventoryService = {
     }
 
     const search = String(filters.search || '').trim().toLowerCase();
-    const source = Array.isArray(filters.items) ? filters.items : defaultInventory;
+    const organizationId = normalizeOrganizationId(filters.organizationId);
+    const source = Array.isArray(filters.items)
+      ? filters.items.filter((item) => Number(item.organizationId) === organizationId)
+      : getDemoInventory(organizationId);
 
     let data = source;
 
@@ -114,7 +162,20 @@ export const inventoryService = {
       return inventoryRepository.findBySku(sku, warehouse, organizationId);
     }
 
-    return defaultInventory.find((item) => String(item.sku).toLowerCase() === String(sku || '').trim().toLowerCase()) || null;
+    const tenantId = normalizeOrganizationId(organizationId);
+    return getDemoInventory(tenantId).find((item) => (
+      String(item.sku).toLowerCase() === String(sku || '').trim().toLowerCase() &&
+      String(item.warehouse || 'PRINCIPAL') === String(warehouse || 'PRINCIPAL')
+    )) || null;
+  },
+
+  async findById(id, organizationId = 1) {
+    if (global.mysqlAvailable) {
+      return inventoryRepository.findById(id, organizationId);
+    }
+
+    const tenantId = normalizeOrganizationId(organizationId);
+    return getDemoInventory(tenantId).find((item) => String(item.id) === String(id)) || null;
   },
 
   async create(payload = {}, organizationId = 1) {
@@ -122,13 +183,17 @@ export const inventoryService = {
       return inventoryRepository.create(payload, organizationId);
     }
 
+    const tenantId = normalizeOrganizationId(organizationId);
     const unit = normalizeUnit(payload.unit || payload.unidad || payload.unidadMedida || payload.unitMeasure || 'PZA');
     if (!isSupportedUnit(unit)) {
       throw new Error(`Unidad no soportada: ${payload.unit || payload.unidad || payload.unidadMedida || payload.unitMeasure || 'PZA'}`);
     }
 
+    const productId = resolveDemoProductId({ productId: payload.productId, sku: payload.sku, organizationId: tenantId });
     const item = {
       id: Date.now(),
+      organizationId: tenantId,
+      productId,
       sku: payload.sku || `SKU-${Date.now()}`,
       barcode: payload.barcode || '',
       name: payload.name || 'Nuevo producto',
@@ -143,7 +208,7 @@ export const inventoryService = {
       active: payload.active !== false
     };
 
-    defaultInventory.push(item);
+    getDemoInventory(tenantId, true).push(item);
     return item;
   },
 
@@ -152,30 +217,39 @@ export const inventoryService = {
       return inventoryRepository.update(id, payload, organizationId);
     }
 
-    const index = defaultInventory.findIndex((item) => String(item.id) === String(id));
+    const tenantId = normalizeOrganizationId(organizationId);
+    const inventory = getDemoInventory(tenantId);
+    const index = inventory.findIndex((item) => String(item.id) === String(id));
 
     if (index === -1) {
       return null;
     }
 
-    const nextUnit = normalizeUnit(payload.unit || payload.unidad || payload.unidadMedida || payload.unitMeasure || defaultInventory[index].unit || 'PZA');
+    const current = inventory[index];
+    const nextUnit = normalizeUnit(payload.unit || payload.unidad || payload.unidadMedida || payload.unitMeasure || current.unit || 'PZA');
     if (!isSupportedUnit(nextUnit)) {
-      throw new Error(`Unidad no soportada: ${payload.unit || payload.unidad || payload.unidadMedida || payload.unitMeasure || defaultInventory[index].unit || 'PZA'}`);
+      throw new Error(`Unidad no soportada: ${payload.unit || payload.unidad || payload.unidadMedida || payload.unitMeasure || current.unit || 'PZA'}`);
     }
 
-    defaultInventory[index] = {
-      ...defaultInventory[index],
+    const hasProductId = Object.prototype.hasOwnProperty.call(payload, 'productId');
+    const productId = hasProductId
+      ? resolveDemoProductId({ productId: payload.productId, sku: payload.sku ?? current.sku, organizationId: tenantId, resolveBySku: false })
+      : current.productId ?? resolveDemoProductId({ sku: payload.sku ?? current.sku, organizationId: tenantId });
+    inventory[index] = {
+      ...current,
       ...payload,
       id: Number(id),
-      stock: Number(payload.stock ?? defaultInventory[index].stock ?? 0),
-      minStock: Number(payload.minStock ?? defaultInventory[index].minStock ?? 0),
-      cost: Number(payload.cost ?? defaultInventory[index].cost ?? 0),
-      price: Number(payload.price ?? defaultInventory[index].price ?? 0),
+      organizationId: tenantId,
+      productId,
+      stock: Number(payload.stock ?? current.stock ?? 0),
+      minStock: Number(payload.minStock ?? current.minStock ?? 0),
+      cost: Number(payload.cost ?? current.cost ?? 0),
+      price: Number(payload.price ?? current.price ?? 0),
       unit: nextUnit,
-      warehouse: payload.warehouse || defaultInventory[index].warehouse || 'PRINCIPAL'
+      warehouse: payload.warehouse || current.warehouse || 'PRINCIPAL'
     };
 
-    return defaultInventory[index];
+    return inventory[index];
   },
 
   async lowStock({ organizationId = 1 } = {}) {
@@ -183,7 +257,7 @@ export const inventoryService = {
       return inventoryRepository.lowStock({ organizationId });
     }
 
-    return defaultInventory.filter((item) => Number(item.stock) <= Number(item.minStock || 0));
+    return getDemoInventory(organizationId).filter((item) => Number(item.stock) <= Number(item.minStock || 0));
   },
 
   async getAdminSummary(filters = {}) {
@@ -191,7 +265,7 @@ export const inventoryService = {
       return inventoryRepository.getAdminSummary(filters);
     }
 
-    const items = defaultInventory.filter((item) => !filters.warehouse || item.warehouse === filters.warehouse);
+    const items = getDemoInventory(filters.organizationId).filter((item) => !filters.warehouse || item.warehouse === filters.warehouse);
     const byWarehouse = new Map();
     const byCategory = new Map();
 
@@ -227,7 +301,7 @@ export const inventoryService = {
       return inventoryRepository.getLowStockReport(filters);
     }
 
-    return defaultInventory
+    return getDemoInventory(filters.organizationId)
       .filter((item) => (!filters.warehouse || item.warehouse === filters.warehouse) && Number(item.stock) <= Number(item.minStock || 0))
       .slice(0, Math.min(500, Number(filters.limit) || 100))
       .map((item) => ({ ...item, shortage: Number(item.minStock || 0) - Number(item.stock || 0) }));
@@ -238,8 +312,14 @@ export const inventoryService = {
       return inventoryRepository.createMovement({ ...payload, user: context.user, organizationId: context.organizationId });
     }
 
-    const item = defaultInventory.find((entry) => entry.sku === payload.sku && entry.warehouse === (payload.warehouse || 'PRINCIPAL'));
+    const tenantId = normalizeOrganizationId(context.organizationId);
+    const item = getDemoInventory(tenantId).find((entry) => entry.sku === payload.sku && entry.warehouse === (payload.warehouse || 'PRINCIPAL'));
     if (!item) throw new Error('Artículo no encontrado');
+    const productId = resolveDemoProductId({
+      productId: payload.productId,
+      sku: payload.sku,
+      organizationId: tenantId
+    });
     const quantity = Number(payload.quantity);
     const stockBefore = Number(item.stock);
     const stockAfter = payload.movementType === 'EXIT'
@@ -251,8 +331,9 @@ export const inventoryService = {
       throw new Error('Movimiento o cantidad inválida');
     }
     item.stock = stockAfter;
+    item.productId = productId ?? item.productId ?? null;
     const movement = { id: Date.now(), sku: item.sku, warehouse: item.warehouse, movementType: payload.movementType, quantity, stockBefore, stockAfter, reason: payload.reason || '', userId: context.user?.id || null, username: context.user?.username || null };
-    demoMovements.push(movement);
+    getDemoMovements(tenantId, true).push({ ...movement, organizationId: tenantId });
     return movement;
   },
 
@@ -260,7 +341,7 @@ export const inventoryService = {
     if (global.mysqlAvailable) {
       return inventoryRepository.listMovements(filters);
     }
-    const filtered = demoMovements.filter((movement) => (!filters.sku || movement.sku === filters.sku) && (!filters.warehouse || movement.warehouse === filters.warehouse));
+    const filtered = getDemoMovements(filters.organizationId).filter((movement) => (!filters.sku || movement.sku === filters.sku) && (!filters.warehouse || movement.warehouse === filters.warehouse));
     return { data: filtered, total: filtered.length, page: 1, perPage: filtered.length || 50, totalPages: 1 };
   },
 
@@ -298,7 +379,7 @@ export const inventoryService = {
 
     const imported = [];
     for (const row of rows) {
-      imported.push(await this.create(row));
+      imported.push(await this.create(row, options.organizationId ?? 1));
     }
 
     return {

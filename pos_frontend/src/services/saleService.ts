@@ -45,8 +45,9 @@ const toPlainSaleItems = (items: any[] = []) => items.map((item: any) => {
   const subtotal = Number(item?.subtotal ?? item?.total ?? price * quantity)
 
   return {
-    id: item?.id ?? product?.id ?? null,
-    productId: item?.productId ?? product?.id ?? null,
+    id: item?.productId ?? product?.productId ?? (product?.inventoryItemId ? null : (typeof item?.id === 'number' ? item.id : product?.id ?? null)),
+    productId: item?.productId ?? product?.productId ?? (product?.inventoryItemId ? null : product?.id ?? null),
+    inventoryItemId: item?.inventoryItemId ?? product?.inventoryItemId ?? null,
     codigoProd: item?.codigoProd ?? product?.codigoProd ?? '',
     nombreProd: item?.nombreProd ?? product?.nombreProd ?? product?.name ?? 'Producto',
     quantity: Number.isFinite(quantity) ? quantity : 0,

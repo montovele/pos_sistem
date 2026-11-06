@@ -2,8 +2,10 @@ import express from 'express';
 import { productService } from '../services/productService.js';
 import { jsonSuccess } from '../utils/response.js';
 import { inventoryService } from '../../inventario/module/inventoryService.js';
+import requireAuth from '../middleware/auth.js';
 
 const router = express.Router();
+router.use(requireAuth);
 
 const isInventoryRequest = (query = {}) => {
   const source = String(query.source || query.type || query.mode || query.view || '').trim().toLowerCase();
@@ -19,11 +21,14 @@ router.get('/', async (req, res) => {
   console.log('[PRODUCTS /] consultando productos con filtros:', req.query);
 
   const inventoryRequested = isInventoryRequest(req.query);
-  const organizationId = Number(req.user?.organizationId || req.query.organizationId || 1);
+  const organizationId = Number(req.user?.organizationId);
+  if (inventoryRequested && (!Number.isInteger(organizationId) || organizationId < 1)) {
+    return res.status(403).json({ success: false, message: 'El usuario no tiene una organización válida' });
+  }
 
   const result = inventoryRequested
     ? await inventoryService.list({ ...req.query, organizationId, page: Number(req.query.page || 1), perPage: Number(req.query.perPage || 50) })
-    : await productService.list(req.query);
+    : await productService.list({ ...req.query, organizationId });
 
   const sourceName = inventoryRequested ? 'inventario_items' : 'productos';
   const sourceLabel = inventoryRequested ? 'INVENTARIO REAL (compatibilidad frontend)' : 'CATÁLOGO POS (tabla productos)';
@@ -51,7 +56,7 @@ router.get('/', async (req, res) => {
 
 router.get('/search', async (req, res) => {
   console.log('[PRODUCTS /search] búsqueda de productos:', req.query);
-  const result = await productService.list(req.query);
+  const result = await productService.list({ ...req.query, organizationId: req.user.organizationId });
   console.log('[PRODUCTS /search] resultados:', result.data.length);
   return res.json(jsonSuccess(result.data, {
     total: result.total,
@@ -64,7 +69,7 @@ router.get('/search', async (req, res) => {
 router.get('/by-code', async (req, res) => {
   const code = String(req.query.code || '').trim();
   console.log('[PRODUCTS /by-code] consultando producto por código:', code);
-  const product = await productService.findByCode(code);
+  const product = await productService.findByCode(code, req.user.organizationId);
 
   if (!product) {
     console.warn('[PRODUCTS /by-code] producto no encontrado:', code);
@@ -77,7 +82,7 @@ router.get('/by-code', async (req, res) => {
 router.get('/category/:categoryId', async (req, res) => {
   const categoryId = req.params.categoryId;
   console.log('[PRODUCTS /category] consultando categoría:', categoryId);
-  const filtered = await productService.findByCategory(categoryId);
+  const filtered = await productService.findByCategory(categoryId, req.user.organizationId);
   console.log('[PRODUCTS /category] productos encontrados:', filtered.length);
   return res.json(jsonSuccess(filtered));
 });
@@ -85,7 +90,7 @@ router.get('/category/:categoryId', async (req, res) => {
 router.get('/:id', async (req, res) => {
   const id = req.params.id;
   console.log('[PRODUCTS /:id] consultando producto id:', id);
-  const product = await productService.findById(id);
+  const product = await productService.findById(id, req.user.organizationId);
   if (!product) {
     console.warn('[PRODUCTS /:id] producto no encontrado:', id);
     return res.status(404).json({ success: false, message: 'Producto no encontrado' });
@@ -99,7 +104,7 @@ router.put('/:id', async (req, res) => {
   console.log('[PRODUCTS /:id PUT] actualizando producto id:', id, 'payload:', req.body);
   let updated;
   try {
-    updated = await productService.update(id, req.body || {});
+    updated = await productService.update(id, req.body || {}, req.user.organizationId);
   } catch (error) {
     return res.status(400).json({ success: false, message: error.message });
   }

@@ -66,7 +66,7 @@ export const useCartStore = defineStore('cart', () => {
           price: normalizedProduct.price,
           codigoProd: normalizedProduct.codigoProd,
           nombreProd: normalizedProduct.nombreProd,
-          productId: normalizedProduct.id
+          productId: normalizedProduct.productId ?? (normalizedProduct.inventoryItemId ? undefined : normalizedProduct.id)
         }
       })
       return true
@@ -75,7 +75,7 @@ export const useCartStore = defineStore('cart', () => {
     const cartItem: CartItem = {
       id: `${product.id}-${Date.now()}`,
       product: normalizedProduct,
-      productId: product.id,
+      productId: normalizedProduct.productId ?? (normalizedProduct.inventoryItemId ? undefined : normalizedProduct.id),
       codigoProd: product.codigoProd,
       nombreProd: product.nombreProd,
       quantity: normalizedQuantity,

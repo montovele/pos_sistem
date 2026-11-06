@@ -271,7 +271,7 @@ const handleSubmit = async () => {
 
       return {
         ...item,
-        productId: item.productId ?? item.product?.id,
+        productId: item.productId ?? item.product?.productId ?? (item.product?.inventoryItemId ? undefined : item.product?.id),
         codigoProd: item.product?.codigoProd ?? item.codigoProd,
         nombreProd: item.product?.nombreProd ?? item.nombreProd,
         unit: productUnit,

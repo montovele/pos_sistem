@@ -81,6 +81,13 @@ const main = async () => {
   assert.equal(linkedInventorySale.total, 26.99, 'Debe aplicar descuento al precio del SKU de inventario');
   assert.equal((await inventoryService.findBySku('SKU-001')).stock, linkedInventoryStockBefore - 1, 'Debe descontar el stock del SKU enlazado');
 
+  const inventoryOnlyBefore = Number((await inventoryService.findBySku('SKU-001')).stock);
+  const inventoryOnlySale = await transactionService.create({
+    items: [{ inventoryItemId: inventoryBefore.id, quantity: 1 }]
+  }, admin);
+  assert.equal(inventoryOnlySale.items[0].inventoryItemId, inventoryBefore.id, 'Debe conservar el ID del registro de inventario al cobrar');
+  assert.equal((await inventoryService.findBySku('SKU-001')).stock, inventoryOnlyBefore - 1, 'Debe cobrar y descontar stock usando únicamente el ID de inventario');
+
   console.log('POS demo auth test passed');
 };
 

@@ -31,13 +31,18 @@ const requireAuth = async (req, res, next) => {
         return res.status(401).json({ success: false, message: 'Usuario demo no encontrado' });
       }
 
+      const organizationId = Number(user.organizationId);
+      if (!Number.isInteger(organizationId) || organizationId < 1) {
+        return res.status(403).json({ success: false, message: 'El usuario no tiene una organización válida' });
+      }
+
       req.user = {
         id: user.id,
         username: user.username,
         email: user.email,
         nombreEmpleado: user.nombreEmpleado || user.username,
         numeroEmpleado: Number(user.numeroEmpleado || 0),
-        organizationId: Number(user.organizationId || 1),
+        organizationId,
         organizationName: user.organizationName || 'Empresa Demo',
         role: user.role || 'admin',
         active: user.active !== false && user.activo !== false,
@@ -58,7 +63,7 @@ const requireAuth = async (req, res, next) => {
       `SELECT u.id, u.username, u.nombre, u.apellido, u.email, u.numero_empleado,
               u.organization_id, o.nombre_org AS organization_name, u.role, u.activo
        FROM usuarios u
-       LEFT JOIN organizaciones o ON o.id = u.organization_id
+       JOIN organizaciones o ON o.id = u.organization_id
        WHERE u.id = ? LIMIT 1`,
       [Number(match[1])]
     );
@@ -68,13 +73,18 @@ const requireAuth = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Usuario no encontrado' });
     }
 
+    const organizationId = Number(user.organization_id);
+    if (!Number.isInteger(organizationId) || organizationId < 1) {
+      return res.status(403).json({ success: false, message: 'El usuario no tiene una organización válida' });
+    }
+
     req.user = {
       id: user.id,
       username: user.username,
       email: user.email,
       nombreEmpleado: `${user.nombre || ''} ${user.apellido || ''}`.trim() || user.username,
       numeroEmpleado: Number(user.numero_empleado || 0),
-      organizationId: Number(user.organization_id || 1),
+      organizationId,
       organizationName: user.organization_name || user.organizationName || 'Empresa Demo',
       role: user.role || 'admin',
       active: user.activo !== false,
