@@ -132,6 +132,74 @@ test('does not activate a paid checkout with a different Stripe price', async ()
   assert.equal(provisioned, false);
 });
 
+test('recreates the Stripe product and price when explicitly provisioning for another Stripe mode', async () => {
+  const statements = [];
+  const currentPlan = {
+    code: 'monthly',
+    name: 'Suscripción mensual',
+    description: 'Acceso mensual al sistema POS',
+    amount: 599,
+    currency: 'MXN',
+    interval_unit: 'month',
+    interval_count: 1,
+    stripe_product_id: 'prod_test_previous',
+    stripe_price_id: 'price_test_previous',
+    is_active: 1
+  };
+  const connection = {
+    beginTransaction: async () => {},
+    commit: async () => {},
+    rollback: async () => {},
+    release: () => {},
+    execute: async (sql, values) => {
+      statements.push({ sql, values });
+      if (sql.includes('SELECT stripe_price_id FROM pos_subscription_plans')) {
+        return [[{ stripe_price_id: currentPlan.stripe_price_id }], []];
+      }
+      return [{ affectedRows: 1 }, []];
+    }
+  };
+  const productCalls = [];
+  const priceCalls = [];
+  const service = createPosSubscriptionService({
+    pool: {
+      execute: async (sql) => {
+        if (sql.includes('FROM pos_subscription_plans')) return [[currentPlan], []];
+        return [[], []];
+      },
+      getConnection: async () => connection
+    },
+    stripe: {
+      products: {
+        create: async (params) => {
+          productCalls.push(params);
+          return { id: 'prod_live_new' };
+        }
+      },
+      prices: {
+        create: async (params) => {
+          priceCalls.push(params);
+          return { id: 'price_live_new' };
+        }
+      }
+    }
+  });
+
+  await service.updateMonthlyPlan({ provision_price: true }, 7, '127.0.0.1');
+
+  assert.equal(productCalls.length, 1);
+  assert.equal(priceCalls.length, 1);
+  assert.equal(priceCalls[0].product, 'prod_live_new');
+  assert.ok(statements.some(({ sql, values }) => (
+    sql.includes('INSERT INTO pos_subscription_price_history') && values.includes('price_live_new')
+  )));
+  assert.ok(statements.some(({ sql, values }) => (
+    sql.includes('UPDATE pos_subscription_plans')
+      && values.includes('prod_live_new')
+      && values.includes('price_live_new')
+  )));
+});
+
 test('acknowledges guest subscription events that arrive before checkout provisioning', async () => {
   const statements = [];
   const pool = {

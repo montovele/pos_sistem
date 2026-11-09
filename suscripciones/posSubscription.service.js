@@ -289,8 +289,8 @@ export function createPosSubscriptionService({ pool, stripe = null, guestSignupS
       });
     }
 
-    const priceChanged = Number(currentPlan.amount) !== nextAmount
-      || (!currentPlan.stripe_price_id && values.provision_price === true);
+    const replaceStripePrice = values.provision_price === true;
+    const priceChanged = Number(currentPlan.amount) !== nextAmount || replaceStripePrice;
     const productChanged = nextName !== currentPlan.name || nextDescription !== (currentPlan.description || '');
     if (values.is_active === true && !currentPlan.is_active && !currentPlan.stripe_price_id && !priceChanged) {
       throw Object.assign(new Error('Configura el precio recurrente de Stripe antes de activar el plan.'), {
@@ -305,7 +305,7 @@ export function createPosSubscriptionService({ pool, stripe = null, guestSignupS
       });
     }
 
-    let productId = currentPlan.stripe_product_id;
+    let productId = replaceStripePrice ? null : currentPlan.stripe_product_id;
     if (stripe && !productId && (priceChanged || productChanged)) {
       const product = await stripe.products.create({
         name: nextName || PLAN_NAME,

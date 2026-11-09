@@ -43,16 +43,23 @@
           <input v-model="editablePlanActive" type="checkbox" />
           Plan publicado y disponible para contratar
         </label>
+        <label v-if="plan?.has_stripe_price && plan?.stripe_configured" class="checkbox-label">
+          <input v-model="replaceStripePrice" type="checkbox" />
+          Recrear producto y precio usando las credenciales Stripe actuales
+        </label>
         <div class="global-plan-actions">
           <span class="status-badge" :class="plan?.is_active ? 'active' : 'inactive'">
             {{ plan?.is_active ? 'Plan activo' : 'Plan desactivado' }}
           </span>
           <button class="primary-button" type="button" :disabled="savingPrice || !planChanged" @click="savePlan">
-            {{ savingPrice ? 'Guardando…' : 'Guardar plan SaaS' }}
+            {{ savingPrice ? 'Guardando…' : replaceStripePrice ? 'Recrear precio y guardar' : 'Guardar plan SaaS' }}
           </button>
         </div>
       </div>
       <p class="hint">Cambiar el precio crea un nuevo precio recurrente en Stripe; las suscripciones existentes conservan sus condiciones.</p>
+      <p v-if="replaceStripePrice" class="hint">
+        Se creará un producto y precio nuevos en la cuenta Stripe configurada en este backend. Usa esta opción al cambiar de modo de prueba a producción o si el precio actual no existe en esa cuenta. El nuevo precio se usará para contrataciones futuras.
+      </p>
       <p v-if="!plan?.stripe_configured" class="hint">
         Configuración Stripe pendiente: el plan y las suscripciones existentes se pueden administrar, pero no se pueden crear o cambiar precios ni cobrar en línea hasta configurar las claves del backend.
       </p>
@@ -384,6 +391,7 @@ const editableAmount = ref(599)
 const editableName = ref('Suscripción mensual')
 const editableDescription = ref('Acceso mensual al sistema POS')
 const editablePlanActive = ref(true)
+const replaceStripePrice = ref(false)
 const organizations = ref<OrganizationSubscription[]>([])
 const startDates = ref<Record<number, string>>({})
 const expirationDates = ref<Record<number, string>>({})
@@ -412,6 +420,7 @@ const planChanged = computed(() => (
   || editableName.value.trim() !== (plan.value?.name || '')
   || editableDescription.value.trim() !== (plan.value?.description || '')
   || editablePlanActive.value !== (plan.value?.is_active ?? true)
+  || replaceStripePrice.value
   || (!plan.value?.has_stripe_price && plan.value?.stripe_configured)
 ))
 const formattedPrice = computed(() => new Intl.NumberFormat('es-MX', {
@@ -448,6 +457,7 @@ async function load() {
     editableName.value = subscriptionData.value.plan?.name || 'Suscripción mensual'
     editableDescription.value = subscriptionData.value.plan?.description || ''
     editablePlanActive.value = subscriptionData.value.plan?.is_active ?? true
+    replaceStripePrice.value = false
     if (isSuperAdmin.value) await loadOrganizations()
     if (route.query.checkout === 'success' && !subscriptionData.value.access_allowed) {
       await refreshPaymentStatus()
@@ -516,7 +526,7 @@ async function savePlan() {
       description: editableDescription.value.trim(),
       amount: Number(editableAmount.value),
       is_active: editablePlanActive.value,
-      provision_price: !plan.value?.has_stripe_price && plan.value?.stripe_configured
+      provision_price: replaceStripePrice.value || (!plan.value?.has_stripe_price && plan.value?.stripe_configured)
     })
     await load()
     notice.value = 'El plan SaaS se actualizó correctamente.'
