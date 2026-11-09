@@ -10,6 +10,7 @@ const PaymentRecoveryPage = () => import('@/pages/PaymentRecoveryPage.vue')
 const HomePage = () => import('@/pages/HomePage.vue')
 const PosPage = () => import('@/pages/PosPage.vue')
 const ReportsPage = () => import('@/pages/ReportsPage.vue')
+const SalesAnalyticsPage = () => import('@/pages/SalesAnalyticsPage.vue')
 const EmpleadosPage = () => import('@/pages/EmpleadosPage.vue')
 const CajaPage = () => import('@/pages/CajaPage.vue')
 const SettingsPage = () => import('@/pages/SettingsPage.vue')
@@ -63,6 +64,12 @@ const routes: RouteRecordRaw[] = [
     name: 'POS',
     component: PosPage,
     meta: { requiresAuth: true }
+  },
+  {
+    path: '/estadisticas',
+    name: 'SalesAnalytics',
+    component: SalesAnalyticsPage,
+    meta: { requiresAuth: true, requiresAdmin: true }
   },
   {
     path: '/reports',

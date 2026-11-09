@@ -23,6 +23,7 @@ export interface CashShortage {
 
 export interface ReportStats {
   totalSales: number
+  totalDiscounts: number
   totalTransactions: number
   totalItems: number
   averageTicket: number
@@ -302,6 +303,7 @@ export const useReports = () => {
 
       // Calcular estadísticas
       const totalSales = filteredTransactions.value.reduce((sum, t) => sum + Number(t.total || 0), 0)
+      const totalDiscounts = filteredTransactions.value.reduce((sum, t) => sum + Number(t.discount || 0), 0)
       const totalItems = filteredTransactions.value.reduce(
         (sum, t) =>
           sum +
@@ -313,6 +315,7 @@ export const useReports = () => {
 
       const stats: ReportStats = {
         totalSales: Number(payload.totalSales ?? totalSales),
+        totalDiscounts: Number(payload.totalDiscounts ?? totalDiscounts),
         totalTransactions: filteredTransactions.value.length || Number(payload.totalTransactions ?? 0),
         totalItems: Number(payload.totalItems ?? totalItems),
         averageTicket:
@@ -348,6 +351,7 @@ export const useReports = () => {
         const filtered = applyFilters(all, activeFilter)
 
         const totalSales = filtered.reduce((sum, t) => sum + Number(t.total || 0), 0)
+        const totalDiscounts = filtered.reduce((sum, t) => sum + Number(t.discount || 0), 0)
         const totalItems = filtered.reduce(
           (sum, t) =>
             sum +
@@ -359,6 +363,7 @@ export const useReports = () => {
 
         const fallbackStats: ReportStats = {
           totalSales,
+          totalDiscounts,
           totalTransactions: filtered.length,
           totalItems,
           averageTicket: filtered.length > 0 ? totalSales / filtered.length : 0,

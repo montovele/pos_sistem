@@ -103,6 +103,7 @@ const menuItems = [
   { label: 'Caja', to: '/caja' },
   { label: 'Facturas', to: '/facturas', adminOnly: true },
   { label: 'Inventario', to: '/inventario', adminOnly: true },
+  { label: 'Estadísticas', to: '/estadisticas', adminOnly: true },
   { label: 'Reportes', to: '/reports', adminOnly: true },
   { label: 'Empleados', to: '/empleados', adminOnly: true },
   { label: 'Configuración', to: '/settings', adminOnly: true },
